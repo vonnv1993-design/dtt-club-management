@@ -3,37 +3,65 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import hashlib
+import json
+import os
 
-# --- Hàm băm mật khẩu đơn giản ---
+# --- Hàm băm mật khẩu ---
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# --- Khởi tạo dữ liệu lưu trong session_state ---
-if 'users' not in st.session_state:
-    # users: dict email -> {name, phone, password_hash, role, approved, wins, balance, votes}
-    st.session_state.users = {
-        'admin': {
-            'name': 'Admin',
-            'phone': '',
-            'password_hash': hash_password('Admin@123'),
-            'role': 'admin',
-            'approved': True,
-            'wins': 0,
-            'balance': 0,
-            'votes': []
-        }
+# --- Hàm đọc/ghi JSON ---
+def load_json(filename, default_data):
+    if os.path.exists(filename):
+        with open(filename, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    else:
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(default_data, f, ensure_ascii=False, indent=2)
+        return default_data
+
+def save_json(filename, data):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def save_all():
+    save_json(USERS_FILE, st.session_state.users)
+    save_json(VOTES_FILE, st.session_state.votes)
+    save_json(EXPENSES_FILE, st.session_state.expenses)
+
+# --- Đường dẫn file dữ liệu ---
+USERS_FILE = "users.json"
+VOTES_FILE = "votes.json"
+EXPENSES_FILE = "expenses.json"
+
+# --- Dữ liệu mặc định admin ---
+default_users = {
+    "admin@local": {
+        "name": "Admin",
+        "phone": "",
+        "password_hash": hash_password("Admin@123"),
+        "role": "admin",
+        "approved": True,
+        "wins": 0,
+        "balance": 0,
+        "votes": []
     }
+}
+
+# --- Khởi tạo dữ liệu từ file JSON ---
+if 'users' not in st.session_state:
+    st.session_state.users = load_json(USERS_FILE, default_users)
 
 if 'pending_users' not in st.session_state:
-    st.session_state.pending_users = {}  # email -> user info chờ duyệt
+    # Lọc ra các user chưa được approved
+    pending = {email: u for email, u in st.session_state.users.items() if not u.get('approved', False)}
+    st.session_state.pending_users = pending
 
 if 'votes' not in st.session_state:
-    # votes: list of dict {date, voters: list of emails}
-    st.session_state.votes = []
+    st.session_state.votes = load_json(VOTES_FILE, [])
 
 if 'expenses' not in st.session_state:
-    # expenses: list of dict {date, amount, participants: list of emails}
-    st.session_state.expenses = []
+    st.session_state.expenses = load_json(EXPENSES_FILE, [])
 
 # --- Hàm đăng nhập ---
 def login():
@@ -76,8 +104,8 @@ def register():
             if email in st.session_state.users or email in st.session_state.pending_users:
                 st.error("Email đã được đăng ký.")
                 return
-            # Lưu vào pending_users
-            st.session_state.pending_users[email] = {
+            # Lưu vào pending_users và users (chưa approved)
+            new_user = {
                 'name': name,
                 'phone': phone,
                 'password_hash': hash_password(password),
@@ -87,6 +115,9 @@ def register():
                 'balance': 0,
                 'votes': []
             }
+            st.session_state.pending_users[email] = new_user
+            st.session_state.users[email] = new_user
+            save_all()
             st.success("Đăng ký thành công! Vui lòng chờ quản trị viên phê duyệt.")
 
 # --- Tab quản trị viên duyệt thành viên ---
@@ -104,11 +135,17 @@ def admin_approve_users():
                 info['approved'] = True
                 st.session_state.users[email] = info
                 del st.session_state.pending_users[email]
+                save_all()
                 st.success(f"Đã phê duyệt {email}")
                 st.experimental_rerun()
         with col2:
             if st.button(f"Từ chối {email}"):
-                del st.session_state.pending_users[email]
+                # Xóa user khỏi users và pending
+                if email in st.session_state.users:
+                    del st.session_state.users[email]
+                if email in st.session_state.pending_users:
+                    del st.session_state.pending_users[email]
+                save_all()
                 st.warning(f"Đã từ chối {email}")
                 st.experimental_rerun()
 
@@ -148,6 +185,7 @@ def tab_ranking():
             submitted = st.form_submit_button("Cập nhật")
             if submitted:
                 st.session_state.users[member_email]['wins'] += wins_add
+                save_all()
                 st.success("Cập nhật thành công!")
                 st.experimental_rerun()
 
@@ -163,11 +201,12 @@ def tab_vote():
             if submitted:
                 # Kiểm tra đã có vote ngày đó chưa
                 for v in st.session_state.votes:
-                    if v['date'] == date_vote:
+                    if v['date'] == date_vote.strftime("%Y-%m-%d"):
                         st.warning("Đã có bình chọn cho ngày này.")
                         break
                 else:
-                    st.session_state.votes.append({'date': date_vote, 'voters': []})
+                    st.session_state.votes.append({'date': date_vote.strftime("%Y-%m-%d"), 'voters': []})
+                    save_all()
                     st.success("Tạo bình chọn thành công!")
                     st.experimental_rerun()
 
@@ -178,13 +217,14 @@ def tab_vote():
             return
         st.subheader("Bình chọn tham gia")
         for vote in st.session_state.votes:
-            date_str = vote['date'].strftime("%Y-%m-%d")
+            date_str = vote['date']
             voted = st.session_state.user_email in vote['voters']
             if voted:
                 st.write(f"Bạn đã tham gia bình chọn ngày {date_str}")
             else:
                 if st.button(f"Tham gia ngày {date_str}", key=date_str):
                     vote['voters'].append(st.session_state.user_email)
+                    save_all()
                     st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
                     st.experimental_rerun()
 
@@ -214,6 +254,7 @@ def tab_finance():
         submitted = st.form_submit_button("Cập nhật đóng góp")
         if submitted:
             users[member_email]['balance'] += amount
+            save_all()
             st.success("Cập nhật đóng góp thành công!")
             st.experimental_rerun()
 
@@ -238,6 +279,7 @@ def tab_finance():
                     for email in vote['voters']:
                         users[email]['balance'] -= per_person
                     st.session_state.expenses.append({'date': date_expense, 'amount': cost, 'participants': vote['voters']})
+                    save_all()
                     st.success(f"Đã nhập chi phí và trừ tiền cho {len(vote['voters'])} thành viên.")
                     st.experimental_rerun()
 
