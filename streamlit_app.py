@@ -192,20 +192,106 @@ def tab_members():
 def tab_ranking():
     st.header("🏆 Xếp hạng thành viên theo số trận thắng")
     users = st.session_state.users
-    members = [u for u in users.values() if u['role'] == 'member' and u['approved']]
+    members = {email: u for email, u in users.items() if u['role'] == 'member' and u['approved']}
     if not members:
         st.info("Chưa có thành viên nào được phê duyệt.")
         return
 
-    df = pd.DataFrame(members)
-    df = df[['name', 'wins']]
-    df = df.sort_values(by='wins', ascending=False)  # Sắp xếp giảm dần theo số trận thắng
-    df.columns = ['Tên', 'Số trận thắng']
-    st.dataframe(df.style.bar(subset=['Số trận thắng'], color='#4CAF50'))
+    # Tạo DataFrame từ members
+    df = pd.DataFrame([
+        {'email': email, 'Tên': u['name'], 'Số trận thắng': u['wins']}
+        for email, u in members.items()
+    ])
 
-    # Phần chi tiết trận thắng và nhập trận thắng giữ nguyên như trước
-    # ...
+    # Tính cột Xếp loại
+    def rank_label(wins):
+        if wins > 50:
+            return "Hạt giống 1"
+        elif wins > 30:
+            return "Hạt giống 2"
+        elif wins > 10:
+            return "Hạt giống 3"
+        else:
+            return ""
 
+    df['Xếp loại'] = df['Số trận thắng'].apply(rank_label)
+
+    # Sắp xếp giảm dần theo số trận thắng
+    df = df.sort_values(by='Số trận thắng', ascending=False).reset_index(drop=True)
+
+    # Cho phép admin sửa số trận thắng
+    if st.session_state.user_role == 'admin':
+        st.subheader("Chỉnh sửa số trận thắng")
+        edited_df = st.experimental_data_editor(df[['Tên', 'Số trận thắng', 'Xếp loại']], num_rows="dynamic")
+        if st.button("Lưu cập nhật"):
+            # Cập nhật lại số trận thắng vào session_state.users
+            for idx, row in edited_df.iterrows():
+                # Tìm email theo tên (cẩn thận trùng tên, nên dùng email làm key)
+                # Ở đây dùng tên để tìm email, giả định tên không trùng
+                name = row['Tên']
+                wins_new = int(row['Số trận thắng'])
+                # Tìm email tương ứng
+                email = None
+                for e, u in members.items():
+                    if u['name'] == name:
+                        email = e
+                        break
+                if email:
+                    st.session_state.users[email]['wins'] = wins_new
+            save_all()
+            st.success("Đã cập nhật số trận thắng!")
+            st.experimental_rerun()
+    else:
+        st.dataframe(df[['Tên', 'Số trận thắng', 'Xếp loại']].style.bar(subset=['Số trận thắng'], color='#4CAF50'))
+
+    # Hiển thị chi tiết trận thắng như trước
+    st.subheader("Chi tiết trận thắng")
+    matches = st.session_state.matches
+    if not matches:
+        st.info("Chưa có trận thắng nào được nhập.")
+    else:
+        member_emails = list(members.keys())
+        member_email = st.selectbox("Chọn thành viên", options=member_emails)
+        member_name = users[member_email]['name']
+        member_matches = [m for m in matches if m['player_email'] == member_email]
+        if not member_matches:
+            st.info(f"{member_name} chưa có trận thắng nào được nhập.")
+        else:
+            df_match = pd.DataFrame(member_matches)
+            df_match_display = df_match.rename(columns={
+                'date': 'Ngày thắng',
+                'location': 'Địa điểm',
+                'score': 'Tỉ số',
+                'min_wins': 'Số trận thắng tối thiểu'
+            })
+            df_match_display = df_match_display[['Ngày thắng', 'Địa điểm', 'Tỉ số', 'Số trận thắng tối thiểu']]
+            st.dataframe(df_match_display)
+
+    # Admin nhập trận thắng mới giữ nguyên như trước
+    if st.session_state.user_role == 'admin':
+        st.subheader("Nhập trận thắng mới cho thành viên")
+        with st.form("input_wins"):
+            member_email = st.selectbox("Chọn thành viên", options=member_emails, key="input_wins_member")
+            min_wins = st.number_input("Số trận thắng tối thiểu", min_value=1, step=1)
+            date_str = st.date_input("Ngày trận thắng", value=datetime.today())
+            location = st.text_input("Địa điểm")
+            score = st.text_input("Tỉ số trận thắng (ví dụ 21:15)")
+            submitted = st.form_submit_button("Thêm trận thắng")
+            if submitted:
+                if not location or not score:
+                    st.error("Vui lòng nhập đầy đủ địa điểm và tỉ số trận thắng.")
+                else:
+                    st.session_state.users[member_email]['wins'] += min_wins
+                    st.session_state.matches.append({
+                        'player_email': member_email,
+                        'min_wins': min_wins,
+                        'date': date_str.strftime("%Y-%m-%d"),
+                        'location': location,
+                        'score': score
+                    })
+                    save_all()
+                    st.success("Đã thêm trận thắng thành công!")
+                    st.rerun()
 # --- Tab Vote tham gia chơi ---
 def tab_vote():
     st.header("🗳️ Bình chọn tham gia chơi")
