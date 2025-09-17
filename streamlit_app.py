@@ -82,7 +82,7 @@ def login():
                         st.session_state['user_email'] = email
                         st.session_state['user_role'] = user['role']
                         st.success(f"Chào mừng {user['name']}!")
-                        st.experimental_rerun()
+                       st.rerun()
                     else:
                         st.error("⚠️ Tài khoản chưa được phê duyệt. Vui lòng chờ quản trị viên.")
                 else:
@@ -142,7 +142,7 @@ def admin_approve_users():
                     del st.session_state.pending_users[email]
                     save_all()
                     st.success(f"Đã phê duyệt {email}")
-                    st.experimental_rerun()
+                   st.rerun()
             with col2:
                 if st.button(f"❌ Từ chối {email}", key=f"reject_{email}"):
                     if email in st.session_state.users:
@@ -151,7 +151,7 @@ def admin_approve_users():
                         del st.session_state.pending_users[email]
                     save_all()
                     st.warning(f"Đã từ chối {email}")
-                    st.experimental_rerun()
+                   st.rerun()
 
 # --- Tab danh sách thành viên ---
 def tab_members():
@@ -231,7 +231,7 @@ def tab_ranking():
                     st.session_state.users[email]['wins'] = wins_new
             save_all()
             st.success("Đã cập nhật số trận thắng!")
-            st.experimental_rerun()
+           st.rerun()
     else:
         st.dataframe(df[['Tên', 'Số trận thắng', 'Xếp loại']].style.bar(subset=['Số trận thắng'], color='#4CAF50'))
 
@@ -280,7 +280,7 @@ def tab_ranking():
                     })
                     save_all()
                     st.success("Đã thêm trận thắng thành công!")
-                    st.experimental_rerun()
+                   st.rerun()
 
 # --- Tab Vote ---
 def tab_vote():
@@ -316,7 +316,7 @@ def tab_vote():
                     })
                     save_all()
                     st.success("Tạo bình chọn thành công!")
-                    st.experimental_rerun()
+                   st.rerun()
 
     if st.session_state.user_role == 'member':
         if not st.session_state.votes:
@@ -336,7 +336,7 @@ def tab_vote():
                         vote['voters'].append(st.session_state.user_email)
                         save_all()
                         st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
-                        st.experimental_rerun()
+                       st.rerun()
 
     st.subheader("Thống kê số lượng vote tham gia")
     if not st.session_state.votes:
@@ -361,7 +361,7 @@ def tab_finance():
             users[member_email]['balance'] += amount
             save_all()
             st.success("Cập nhật đóng góp thành công!")
-            st.experimental_rerun()
+           st.rerun()
 
     if st.session_state.user_role == 'admin':
         st.subheader("Nhập chi phí buổi tập")
@@ -384,7 +384,7 @@ def tab_finance():
                         st.session_state.expenses.append({'date': date_expense, 'amount': cost, 'participants': vote['voters']})
                         save_all()
                         st.success(f"Đã nhập chi phí và trừ tiền cho {len(vote['voters'])} thành viên.")
-                        st.experimental_rerun()
+                       st.rerun()
     else:
         st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
 
@@ -478,7 +478,7 @@ def main():
         st.sidebar.markdown(f"**Xin chào, {user['name']}** ({st.session_state.user_role})")
         if st.sidebar.button("🚪 Đăng xuất"):
             st.session_state.login = False
-            st.experimental_rerun()
+            st.rerun()
 
         tabs = ["Home", "Thành viên", "Ranking", "Vote", "Quản lý tài chính"]
         if st.session_state.user_role == 'admin':
