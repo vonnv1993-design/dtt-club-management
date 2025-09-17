@@ -311,7 +311,7 @@ with st.sidebar:
                 if user and user["status"] == "approved" and verify_password(password, user["password_hash"]):
                     st.session_state.auth_user = dict(user)
                     st.success(f"Chào {user['name']} ({user['role']})")
-                    st.experimental_rerun()
+                    st.rerun()
                 elif user and user["status"] == "pending":
                     st.warning("Tài khoản của bạn đang chờ phê duyệt bởi quản trị viên.")
                 else:
