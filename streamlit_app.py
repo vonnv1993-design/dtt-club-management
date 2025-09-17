@@ -412,10 +412,11 @@ def tab_home():
         else:
             st.info("Chưa có dữ liệu bình chọn tham gia.")
 # --- Tab quản lý tài chính ---
+@st.cache_data  # Cache dữ liệu tĩnh để tối ưu hiệu suất trên cloud
 def tab_finance():
     st.header("💰 Quản lý tài chính")
     users = st.session_state.users
-    members = [email for email, u in users.items() if u['role']=='member' and u['approved']]
+    members = [email for email, u in users.items() if u['role'] == 'member' and u['approved']]
 
     st.subheader("Nhập số tiền đóng góp của thành viên")
     with st.form("input_contribution"):
@@ -424,6 +425,10 @@ def tab_finance():
         submitted = st.form_submit_button("Cập nhật đóng góp")
         if submitted:
             users[member_email]['balance'] += amount
+            # Giả định lưu tổng đóng góp (nếu cần, thêm trường 'total_contributed' trong user data)
+            if 'total_contributed' not in users[member_email]:
+                users[member_email]['total_contributed'] = 0
+            users[member_email]['total_contributed'] += amount
             save_all()
             st.success("Cập nhật đóng góp thành công!")
             st.rerun()
@@ -446,6 +451,10 @@ def tab_finance():
                         per_person = cost / len(vote['voters'])
                         for email in vote['voters']:
                             users[email]['balance'] -= per_person
+                            # Lưu chi phí buổi tập cho thành viên (nếu cần, thêm trường 'total_session_cost')
+                            if 'total_session_cost' not in users[email]:
+                                users[email]['total_session_cost'] = 0
+                            users[email]['total_session_cost'] += per_person
                         st.session_state.expenses.append({'date': date_expense, 'amount': cost, 'participants': vote['voters']})
                         save_all()
                         st.success(f"Đã nhập chi phí và trừ tiền cho {len(vote['voters'])} thành viên.")
@@ -454,8 +463,39 @@ def tab_finance():
         st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
 
     st.subheader("Số dư tài chính các thành viên")
-    df = pd.DataFrame([{'Tên': users[email]['name'], 'Số tiền còn lại (VNĐ)': users[email]['balance']} for email in members])
-    st.dataframe(df.style.format({"Số tiền còn lại (VNĐ)": "{:,.0f}"}).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800'))
+    # Tính số buổi tham gia luyện tập
+    attendance_count = {email: 0 for email in members}
+    for vote in st.session_state.votes:
+        for voter in vote['voters']:
+            if voter in attendance_count:
+                attendance_count[voter] += 1
+
+    data = []
+    for email in members:
+        name = users[email]['name']
+        balance = users[email]['balance']
+        # Số tiền đã đóng góp (từ trường 'total_contributed' nếu có, ngược lại dùng balance dương)
+        total_contributed = users[email].get('total_contributed', max(balance, 0))
+        # Số buổi tham gia luyện tập
+        sessions = attendance_count.get(email, 0)
+        # Chi phí cho buổi tập (từ trường 'total_session_cost' nếu có)
+        session_cost = users[email].get('total_session_cost', 0)
+        data.append({
+            'Tên': name,
+            'Số tiền đã đóng góp (VNĐ)': total_contributed,
+            'Số buổi tham gia luyện tập': sessions,
+            'Chi phí cho buổi tập (VNĐ)': session_cost,
+            'Số tiền còn lại (VNĐ)': balance
+        })
+
+    df = pd.DataFrame(data)
+    st.dataframe(
+        df.style.format({
+            "Số tiền đã đóng góp (VNĐ)": "{:,.0f}",
+            "Chi phí cho buổi tập (VNĐ)": "{:,.0f}",
+            "Số tiền còn lại (VNĐ)": "{:,.0f}"
+        }).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800')
+    )
 # --- Main app ---
 def main():
     st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
