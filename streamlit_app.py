@@ -4,7 +4,6 @@ import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 # Page configuration
 st.set_page_config(
@@ -623,31 +622,43 @@ def show_home_page():
             </div>
         """, unsafe_allow_html=True)
     
-    # Charts using matplotlib instead of plotly
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🏆 Top thành viên có nhiều trận thắng")
-        if not rankings_df.empty:
-            top_5 = rankings_df.head(5)
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.barh(top_5['full_name'], top_5['total_wins'], color='skyblue')
-            ax.set_xlabel('Số trận thắng')
-            ax.set_title('Top 5 thành viên xuất sắc')
-            plt.tight_layout()
-            st.pyplot(fig)
-        else:
-            st.info("Chưa có dữ liệu ranking")
-    
-    with col2:
-        st.subheader("💰 Tình hình tài chính")
-        if not financial_df.empty:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.pie(financial_df['total_contribution'], labels=financial_df['full_name'], autopct='%1.1f%%')
-            ax.set_title('Tỷ lệ đóng góp của thành viên')
-            st.pyplot(fig)
-        else:
-            st.info("Chưa có dữ liệu tài chính")
+    # Charts using matplotlib
+    if not rankings_df.empty or not financial_df.empty:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🏆 Top thành viên có nhiều trận thắng")
+            if not rankings_df.empty:
+                top_5 = rankings_df.head(5)
+                fig, ax = plt.subplots(figsize=(10, 6))
+                bars = ax.barh(top_5['full_name'], top_5['total_wins'])
+                ax.set_xlabel('Số trận thắng')
+                ax.set_title('Top 5 thành viên xuất sắc')
+                
+                # Color the bars
+                for i, bar in enumerate(bars):
+                    bar.set_color(plt.cm.Blues(0.5 + 0.5 * i / len(bars)))
+                
+                plt.tight_layout()
+                st.pyplot(fig, clear_figure=True)
+            else:
+                st.info("Chưa có dữ liệu ranking")
+        
+        with col2:
+            st.subheader("💰 Tình hình tài chính")
+            if not financial_df.empty and financial_df['total_contribution'].sum() > 0:
+                # Filter out zero contributions for pie chart
+                contrib_data = financial_df[financial_df['total_contribution'] > 0]
+                if not contrib_data.empty:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ax.pie(contrib_data['total_contribution'], labels=contrib_data['full_name'], 
+                           autopct='%1.1f%%', startangle=90)
+                    ax.set_title('Tỷ lệ đóng góp của thành viên')
+                    st.pyplot(fig, clear_figure=True)
+                else:
+                    st.info("Chưa có đóng góp nào")
+            else:
+                st.info("Chưa có dữ liệu tài chính")
     
     # Recent activities
     st.subheader("📈 Hoạt động gần đây")
@@ -669,13 +680,14 @@ def show_home_page():
     
     if not recent_activities.empty:
         for _, activity in recent_activities.iterrows():
-            activity_date = pd.to_datetime(activity['activity_date']).strftime('%d/%m/%Y %H:%M')
-            st.markdown(f"""
-                <div class="member-card">
-                    <strong>{activity['activity_type']}</strong>: {activity['details']}
-                    <br><small>📅 {activity_date}</small>
-                </div>
-            """, unsafe_allow_html=True)
+            if pd.notna(activity['activity_date']):
+                activity_date = pd.to_datetime(activity['activity_date']).strftime('%d/%m/%Y %H:%M')
+                st.markdown(f"""
+                    <div class="member-card">
+                        <strong>{activity['activity_type']}</strong>: {activity['details']}
+                        <br><small>📅 {activity_date}</small>
+                    </div>
+                """, unsafe_allow_html=True)
     else:
         st.info("Chưa có hoạt động gần đây")
 
@@ -741,18 +753,22 @@ def show_members_page():
         if search_term:
             members_df = members_df[members_df['full_name'].str.contains(search_term, case=False, na=False)]
         
-        # Display members in cards
-        members_df['birth_date'] = pd.to_datetime(members_df['birth_date']).dt.strftime('%d/%m/%Y')
-        members_df.index = range(1, len(members_df) + 1)
-        
-        st.dataframe(
-            members_df.rename(columns={
-                'full_name': 'Họ và tên',
-                'phone': 'Số điện thoại',
-                'birth_date': 'Ngày sinh'
-            })[['Họ và tên', 'Số điện thoại', 'Ngày sinh']],
-            use_container_width=True
-        )
+        # Display members in table
+        if not members_df.empty:
+            display_df = members_df.copy()
+            display_df['birth_date'] = pd.to_datetime(display_df['birth_date']).dt.strftime('%d/%m/%Y')
+            display_df.index = range(1, len(display_df) + 1)
+            
+            st.dataframe(
+                display_df.rename(columns={
+                    'full_name': 'Họ và tên',
+                    'phone': 'Số điện thoại',
+                    'birth_date': 'Ngày sinh'
+                })[['Họ và tên', 'Số điện thoại', 'Ngày sinh']],
+                use_container_width=True
+            )
+        else:
+            st.info("Không tìm thấy thành viên nào")
 
 def show_ranking_page():
     st.title("🏆 Xếp hạng thành viên")
@@ -767,9 +783,13 @@ def show_ranking_page():
                 
                 with col1:
                     members = get_approved_members()['full_name'].tolist()
-                    selected_member = st.selectbox("👤 Chọn thành viên", members)
-                    wins = st.number_input("🏆 Số trận thắng", min_value=1, max_value=10, value=1)
-                    match_date = st.date_input("📅 Ngày thi đấu", value=datetime.now().date())
+                    if members:
+                        selected_member = st.selectbox("👤 Chọn thành viên", members)
+                        wins = st.number_input("🏆 Số trận thắng", min_value=1, max_value=10, value=1)
+                        match_date = st.date_input("📅 Ngày thi đấu", value=datetime.now().date())
+                    else:
+                        st.warning("Chưa có thành viên nào được phê duyệt")
+                        selected_member = None
                 
                 with col2:
                     location = st.text_input("📍 Địa điểm", placeholder="VD: Sân ABC")
@@ -803,15 +823,20 @@ def show_ranking_page():
         # Chart using matplotlib
         if len(rankings_df) > 1:
             st.subheader("📊 Biểu đồ xếp hạng")
-            fig, ax = plt.subplots(figsize=(12, 8))
             top_10 = rankings_df.head(10)
-            ax.bar(range(len(top_10)), top_10['total_wins'], color='lightcoral')
+            fig, ax = plt.subplots(figsize=(12, 8))
+            bars = ax.bar(range(len(top_10)), top_10['total_wins'])
             ax.set_xticks(range(len(top_10)))
             ax.set_xticklabels(top_10['full_name'], rotation=45, ha='right')
             ax.set_ylabel('Số trận thắng')
             ax.set_title('Top 10 thành viên xuất sắc')
+            
+            # Color gradient for bars
+            for i, bar in enumerate(bars):
+                bar.set_color(plt.cm.viridis(1 - i / len(bars)))
+            
             plt.tight_layout()
-            st.pyplot(fig)
+            st.pyplot(fig, clear_figure=True)
 
 def show_voting_page():
     st.title("🗳️ Bình chọn tham gia")
@@ -871,19 +896,19 @@ def show_voting_page():
                 with col3:
                     if st.button("👁️ Chi tiết", key=f"detail_{session['id']}", use_container_width=True):
                         vote_details = get_vote_details(session['session_date'])
-                        st.subheader(f"Chi tiết phiên {session_date_formatted}")
                         
-                        if not vote_details.empty:
-                            for _, voter in vote_details.iterrows():
-                                vote_time = pd.to_datetime(voter['created_at']).strftime('%d/%m/%Y %H:%M')
-                                st.markdown(f"""
-                                    <div class="member-card">
-                                        👤 <strong>{voter['full_name']}</strong><br>
-                                        🕒 {vote_time}
-                                    </div>
-                                """, unsafe_allow_html=True)
-                        else:
-                            st.info("Chưa có ai vote cho phiên này")
+                        with st.expander(f"Chi tiết phiên {session_date_formatted}", expanded=True):
+                            if not vote_details.empty:
+                                for _, voter in vote_details.iterrows():
+                                    vote_time = pd.to_datetime(voter['created_at']).strftime('%d/%m/%Y %H:%M')
+                                    st.markdown(f"""
+                                        <div class="member-card">
+                                            👤 <strong>{voter['full_name']}</strong><br>
+                                            🕒 {vote_time}
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                            else:
+                                st.info("Chưa có ai vote cho phiên này")
 
 def show_finance_page():
     st.title("💰 Quản lý tài chính")
@@ -896,13 +921,16 @@ def show_finance_page():
             with st.expander("➕ Thêm đóng góp"):
                 with st.form("add_contribution_form"):
                     members = get_approved_members()['full_name'].tolist()
-                    member_name = st.selectbox("👤 Thành viên", members)
-                    amount = st.number_input("💵 Số tiền (VNĐ)", min_value=10000, step=10000)
-                    
-                    if st.form_submit_button("💾 Lưu", use_container_width=True):
-                        add_contribution(member_name, amount)
-                        st.success(f"Đã thêm {amount:,} VNĐ cho {member_name}")
-                        st.rerun()
+                    if members:
+                        member_name = st.selectbox("👤 Thành viên", members)
+                        amount = st.number_input("💵 Số tiền (VNĐ)", min_value=10000, step=10000)
+                        
+                        if st.form_submit_button("💾 Lưu", use_container_width=True):
+                            add_contribution(member_name, amount)
+                            st.success(f"Đã thêm {amount:,} VNĐ cho {member_name}")
+                            st.rerun()
+                    else:
+                        st.warning("Chưa có thành viên nào được phê duyệt")
         
         with col2:
             with st.expander("➕ Thêm chi phí"):
@@ -973,30 +1001,38 @@ def show_finance_page():
         )
         
         # Charts using matplotlib
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📊 Số dư thành viên")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            colors = ['green' if x >= 0 else 'red' for x in financial_df['balance']]
-            ax.bar(range(len(financial_df)), financial_df['balance'], color=colors)
-            ax.set_xticks(range(len(financial_df)))
-            ax.set_xticklabels(financial_df['full_name'], rotation=45, ha='right')
-            ax.set_ylabel('Số dư (VNĐ)')
-            ax.set_title('Số dư của từng thành viên')
-            plt.tight_layout()
-            st.pyplot(fig)
-        
-        with col2:
-            st.subheader("📊 Mối quan hệ đóng góp vs tham gia")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.scatter(financial_df['sessions_attended'], financial_df['total_contribution'], 
-                      s=100, alpha=0.7, color='skyblue')
-            ax.set_xlabel('Số buổi tham gia')
-            ax.set_ylabel('Tổng đóng góp (VNĐ)')
-            ax.set_title('Mối quan hệ đóng góp vs tham gia')
-            plt.tight_layout()
-            st.pyplot(fig)
+        if len(financial_df) > 1:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📊 Số dư thành viên")
+                fig, ax = plt.subplots(figsize=(10, 6))
+                colors = ['green' if x >= 0 else 'red' for x in financial_df['balance']]
+                bars = ax.bar(range(len(financial_df)), financial_df['balance'], color=colors, alpha=0.7)
+                ax.set_xticks(range(len(financial_df)))
+                ax.set_xticklabels(financial_df['full_name'], rotation=45, ha='right')
+                ax.set_ylabel('Số dư (VNĐ)')
+                ax.set_title('Số dư của từng thành viên')
+                ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+                plt.tight_layout()
+                st.pyplot(fig, clear_figure=True)
+            
+            with col2:
+                st.subheader("📊 Đóng góp vs Tham gia")
+                fig, ax = plt.subplots(figsize=(10, 6))
+                scatter = ax.scatter(financial_df['sessions_attended'], financial_df['total_contribution'], 
+                                   s=100, alpha=0.7, c=range(len(financial_df)), cmap='viridis')
+                ax.set_xlabel('Số buổi tham gia')
+                ax.set_ylabel('Tổng đóng góp (VNĐ)')
+                ax.set_title('Mối quan hệ đóng góp vs tham gia')
+                
+                # Add member names as annotations
+                for i, txt in enumerate(financial_df['full_name']):
+                    ax.annotate(txt[:10], (financial_df.iloc[i]['sessions_attended'], 
+                                         financial_df.iloc[i]['total_contribution']), 
+                               fontsize=8, alpha=0.7)
+                plt.tight_layout()
+                st.pyplot(fig, clear_figure=True)
 
 def show_alerts_page():
     st.title("⚠️ Cảnh báo hệ thống")
@@ -1032,7 +1068,7 @@ def show_alerts_page():
     
     with col1:
         cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM users WHERE is_approved = 0')
+        cursor.execute('SELECT COUNT(*) FROM users WHERE is_approved = 0 AND is_admin = 0')
         pending_count = cursor.fetchone()[0]
         st.metric("⏳ Chờ phê duyệt", pending_count)
     
