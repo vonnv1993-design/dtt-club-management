@@ -425,7 +425,7 @@ def main():
         choice = st.sidebar.radio("Chọn chức năng", ["Đăng nhập", "Đăng ký"])
         if choice == "Đăng nhập":
             login()
- import streamlit as st
+import streamlit as st
 import pandas as pd
 from datetime import datetime
 import hashlib
