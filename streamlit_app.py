@@ -629,7 +629,6 @@ def show_home_page():
     
     # Charts
     col1, col2 = st.columns(2)
-    
     with col1:
         st.subheader("🏆 Top thành viên có nhiều trận thắng")
         if not rankings_df.empty:
