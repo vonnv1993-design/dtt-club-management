@@ -3,14 +3,13 @@ import sqlite3
 import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
 
 # Page configuration
 st.set_page_config(
     page_title="DTT PICKLEBALL CLUB",
     page_icon="🏓",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom CSS for modern, responsive design
@@ -24,6 +23,49 @@ st.markdown("""
         color: white;
         margin-bottom: 30px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .nav-menu {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 30px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+    
+    .nav-button {
+        background: white;
+        border: 1px solid #dee2e6;
+        padding: 10px 20px;
+        margin: 5px;
+        border-radius: 8px;
+        display: inline-block;
+        text-decoration: none;
+        color: #495057;
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    
+    .nav-button:hover {
+        background: #1f4e79;
+        color: white;
+        border-color: #1f4e79;
+    }
+    
+    .nav-button.active {
+        background: #1f4e79;
+        color: white;
+        border-color: #1f4e79;
+    }
+    
+    .user-info {
+        background: linear-gradient(45deg, #28a745, #20c997);
+        color: white;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        text-align: center;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     }
     
     .stat-card {
@@ -101,6 +143,34 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
     }
     
+    .progress-bar {
+        background-color: #e9ecef;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 5px 0;
+    }
+    
+    .progress-fill {
+        height: 25px;
+        border-radius: 10px;
+        text-align: center;
+        line-height: 25px;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
+    }
+    
+    .logout-btn {
+        background: #dc3545;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 5px;
+        cursor: pointer;
+        float: right;
+        margin-top: 10px;
+    }
+    
     @media (max-width: 768px) {
         .stat-card {
             margin: 5px 0;
@@ -111,6 +181,11 @@ st.markdown("""
         }
         .main-header {
             padding: 15px;
+        }
+        .nav-button {
+            display: block;
+            margin: 5px 0;
+            text-align: center;
         }
     }
 </style>
@@ -205,9 +280,6 @@ def init_database():
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-def verify_password(password, hashed):
-    return hash_password(password) == hashed
-
 def register_user(full_name, email, phone, birth_date, password):
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
@@ -247,7 +319,7 @@ def login_user(email, password):
             return False, "Tài khoản chưa được phê duyệt!"
     return False, "Email hoặc mật khẩu không đúng!"
 
-# Database helper functions
+# Database helper functions - KHÔNG BAO GỒM ADMIN
 def get_pending_members():
     conn = sqlite3.connect('pickleball_club.db')
     df = pd.read_sql_query('''
@@ -264,7 +336,7 @@ def get_approved_members():
     df = pd.read_sql_query('''
         SELECT id, full_name, phone, birth_date
         FROM users 
-        WHERE is_approved = 1
+        WHERE is_approved = 1 AND is_admin = 0
         ORDER BY full_name
     ''', conn)
     conn.close()
@@ -298,7 +370,7 @@ def get_rankings():
         SELECT u.full_name, COUNT(r.id) as total_wins
         FROM users u
         LEFT JOIN rankings r ON u.id = r.user_id
-        WHERE u.is_approved = 1
+        WHERE u.is_approved = 1 AND u.is_admin = 0
         GROUP BY u.id, u.full_name
         ORDER BY total_wins DESC
     ''', conn)
@@ -309,8 +381,8 @@ def add_ranking(user_name, wins, match_date, location, score):
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
-    # Get user_id
-    cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1', (user_name,))
+    # Get user_id (chỉ thành viên, không phải admin)
+    cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1 AND is_admin = 0', (user_name,))
     user = cursor.fetchone()
     
     if user:
@@ -331,6 +403,7 @@ def get_vote_sessions():
                COUNT(v.id) as vote_count
         FROM vote_sessions vs
         LEFT JOIN votes v ON vs.session_date = v.vote_date
+        LEFT JOIN users u ON v.user_id = u.id AND u.is_admin = 0
         GROUP BY vs.id, vs.session_date, vs.description
         ORDER BY vs.session_date DESC
     ''', conn)
@@ -376,7 +449,7 @@ def get_vote_details(session_date):
         SELECT u.full_name, v.created_at
         FROM votes v
         JOIN users u ON v.user_id = u.id
-        WHERE v.vote_date = ?
+        WHERE v.vote_date = ? AND u.is_admin = 0
         ORDER BY v.created_at
     ''', conn, params=(session_date,))
     conn.close()
@@ -386,7 +459,7 @@ def add_contribution(user_name, amount):
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
-    cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1', (user_name,))
+    cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1 AND is_admin = 0', (user_name,))
     user = cursor.fetchone()
     
     if user:
@@ -404,9 +477,11 @@ def add_expense(session_date, court_fee, water_fee, other_fee, description):
     
     total_fee = court_fee + water_fee + other_fee
     
-    # Get voters for this session
+    # Get voters for this session (chỉ thành viên, không phải admin)
     cursor.execute('''
-        SELECT user_id FROM votes WHERE vote_date = ?
+        SELECT v.user_id FROM votes v
+        JOIN users u ON v.user_id = u.id
+        WHERE v.vote_date = ? AND u.is_admin = 0
     ''', (session_date,))
     voters = cursor.fetchall()
     
@@ -433,7 +508,7 @@ def get_financial_summary():
                COALESCE(SUM(f.amount), 0) as balance
         FROM users u
         LEFT JOIN finances f ON u.id = f.user_id
-        WHERE u.is_approved = 1
+        WHERE u.is_approved = 1 AND u.is_admin = 0
         GROUP BY u.id, u.full_name
         ORDER BY balance DESC
     ''', conn)
@@ -443,7 +518,7 @@ def get_financial_summary():
 def get_alerts():
     alerts = []
     
-    # Check low balance alert
+    # Check low balance alert (chỉ thành viên)
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
@@ -451,7 +526,7 @@ def get_alerts():
         SELECT u.full_name, COALESCE(SUM(f.amount), 0) as balance
         FROM users u
         LEFT JOIN finances f ON u.id = f.user_id
-        WHERE u.is_approved = 1
+        WHERE u.is_approved = 1 AND u.is_admin = 0
         GROUP BY u.id, u.full_name
         HAVING balance < 100000
     ''')
@@ -460,13 +535,13 @@ def get_alerts():
     for user in low_balance_users:
         alerts.append(f"⚠️ {user[0]} có số dư thấp: {user[1]:,} VNĐ")
     
-    # Check low voting activity
+    # Check low voting activity (chỉ thành viên)
     thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     cursor.execute('''
         SELECT u.full_name, COUNT(v.id) as vote_count
         FROM users u
         LEFT JOIN votes v ON u.id = v.user_id AND v.created_at >= ?
-        WHERE u.is_approved = 1
+        WHERE u.is_approved = 1 AND u.is_admin = 0
         GROUP BY u.id, u.full_name
         HAVING vote_count < 3
     ''', (thirty_days_ago,))
@@ -478,6 +553,62 @@ def get_alerts():
     conn.close()
     return alerts
 
+# Custom chart functions using HTML/CSS
+def create_horizontal_bar_chart(data, title):
+    if data.empty:
+        return f"<p>Chưa có dữ liệu cho {title}</p>"
+    
+    max_value = data.iloc[:, 1].max() if len(data) > 0 else 1
+    
+    chart_html = f"<h4>{title}</h4>"
+    for _, row in data.head(5).iterrows():
+        name = row.iloc[0]
+        value = row.iloc[1]
+        percentage = (value / max_value) * 100 if max_value > 0 else 0
+        
+        chart_html += f"""
+        <div style="margin: 10px 0;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <span><strong>{name}</strong></span>
+                <span>{value}</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: {percentage}%; background: linear-gradient(90deg, #1f4e79, #2d5a87);">
+                    {percentage:.1f}%
+                </div>
+            </div>
+        </div>
+        """
+    return chart_html
+
+def create_balance_chart(data):
+    if data.empty:
+        return "<p>Chưa có dữ liệu tài chính</p>"
+    
+    max_abs = max(abs(data['balance'].min()), abs(data['balance'].max())) if len(data) > 0 else 1
+    
+    chart_html = "<h4>📊 Số dư thành viên</h4>"
+    for _, row in data.iterrows():
+        name = row['full_name']
+        balance = row['balance']
+        percentage = abs(balance) / max_abs * 100 if max_abs > 0 else 0
+        color = "#28a745" if balance >= 0 else "#dc3545"
+        
+        chart_html += f"""
+        <div style="margin: 10px 0;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <span><strong>{name}</strong></span>
+                <span style="color: {color};">{balance:,} VNĐ</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: {percentage}%; background: {color};">
+                    {percentage:.1f}%
+                </div>
+            </div>
+        </div>
+        """
+    return chart_html
+
 # Initialize database
 init_database()
 
@@ -486,6 +617,8 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'user' not in st.session_state:
     st.session_state.user = None
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = "🏠 Trang chủ"
 
 # Main app
 def main():
@@ -552,44 +685,67 @@ def show_auth_page():
                     st.error("Vui lòng nhập đầy đủ thông tin!")
 
 def show_main_app():
-    # Sidebar navigation
-    with st.sidebar:
-        st.markdown(f"### Chào mừng, {st.session_state.user['name']}! 👋")
-        st.markdown("---")
-        
-        pages = ["🏠 Trang chủ", "👥 Danh sách thành viên", "🏆 Xếp hạng", "🗳️ Bình chọn", "💰 Tài chính", "⚠️ Cảnh báo"]
-        
-        if st.session_state.user['is_admin']:
-            pages.insert(1, "✅ Phê duyệt thành viên")
-        
-        selected_page = st.selectbox("📍 Chọn trang", pages)
-        
-        st.markdown("---")
-        if st.button("🚪 Đăng xuất", use_container_width=True):
+    # User info and navigation
+    user_role = "👑 Quản trị viên" if st.session_state.user['is_admin'] else "👤 Thành viên"
+    
+    st.markdown(f"""
+        <div class="user-info">
+            <h3>Chào mừng, {st.session_state.user['name']}!</h3>
+            <p>{user_role}</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Navigation menu
+    show_navigation_menu()
+    
+    # Main content based on selected page
+    if st.session_state.current_page == "🏠 Trang chủ":
+        show_home_page()
+    elif st.session_state.current_page == "✅ Phê duyệt thành viên":
+        show_approval_page()
+    elif st.session_state.current_page == "👥 Danh sách thành viên":
+        show_members_page()
+    elif st.session_state.current_page == "🏆 Xếp hạng":
+        show_ranking_page()
+    elif st.session_state.current_page == "🗳️ Bình chọn":
+        show_voting_page()
+    elif st.session_state.current_page == "💰 Tài chính":
+        show_finance_page()
+    elif st.session_state.current_page == "⚠️ Cảnh báo":
+        show_alerts_page()
+
+def show_navigation_menu():
+    # Define menu items based on user role
+    menu_items = ["🏠 Trang chủ", "👥 Danh sách thành viên", "🏆 Xếp hạng", "🗳️ Bình chọn", "💰 Tài chính", "⚠️ Cảnh báo"]
+    
+    if st.session_state.user['is_admin']:
+        menu_items.insert(1, "✅ Phê duyệt thành viên")
+    
+    # Create navigation menu
+    st.markdown('<div class="nav-menu">', unsafe_allow_html=True)
+    
+    cols = st.columns(len(menu_items) + 1)  # +1 for logout button
+    
+    for i, item in enumerate(menu_items):
+        with cols[i]:
+            if st.button(item, key=f"nav_{item}", use_container_width=True):
+                st.session_state.current_page = item
+                st.rerun()
+    
+    # Logout button in the last column
+    with cols[-1]:
+        if st.button("🚪 Đăng xuất", key="logout", use_container_width=True, type="primary"):
             st.session_state.logged_in = False
             st.session_state.user = None
+            st.session_state.current_page = "🏠 Trang chủ"
             st.rerun()
     
-    # Main content
-    if selected_page == "🏠 Trang chủ":
-        show_home_page()
-    elif selected_page == "✅ Phê duyệt thành viên":
-        show_approval_page()
-    elif selected_page == "👥 Danh sách thành viên":
-        show_members_page()
-    elif selected_page == "🏆 Xếp hạng":
-        show_ranking_page()
-    elif selected_page == "🗳️ Bình chọn":
-        show_voting_page()
-    elif selected_page == "💰 Tài chính":
-        show_finance_page()
-    elif selected_page == "⚠️ Cảnh báo":
-        show_alerts_page()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 def show_home_page():
     st.title("📊 Trang chủ - Tổng quan")
     
-    # Statistics
+    # Statistics (chỉ thành viên, không tính admin)
     members_df = get_approved_members()
     rankings_df = get_rankings()
     financial_df = get_financial_summary()
@@ -622,57 +778,44 @@ def show_home_page():
             </div>
         """, unsafe_allow_html=True)
     
-    # Charts using matplotlib
-    if not rankings_df.empty or not financial_df.empty:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🏆 Top thành viên có nhiều trận thắng")
-            if not rankings_df.empty:
-                top_5 = rankings_df.head(5)
-                fig, ax = plt.subplots(figsize=(10, 6))
-                bars = ax.barh(top_5['full_name'], top_5['total_wins'])
-                ax.set_xlabel('Số trận thắng')
-                ax.set_title('Top 5 thành viên xuất sắc')
-                
-                # Color the bars
-                for i, bar in enumerate(bars):
-                    bar.set_color(plt.cm.Blues(0.5 + 0.5 * i / len(bars)))
-                
-                plt.tight_layout()
-                st.pyplot(fig, clear_figure=True)
-            else:
-                st.info("Chưa có dữ liệu ranking")
-        
-        with col2:
-            st.subheader("💰 Tình hình tài chính")
-            if not financial_df.empty and financial_df['total_contribution'].sum() > 0:
-                # Filter out zero contributions for pie chart
-                contrib_data = financial_df[financial_df['total_contribution'] > 0]
-                if not contrib_data.empty:
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    ax.pie(contrib_data['total_contribution'], labels=contrib_data['full_name'], 
-                           autopct='%1.1f%%', startangle=90)
-                    ax.set_title('Tỷ lệ đóng góp của thành viên')
-                    st.pyplot(fig, clear_figure=True)
-                else:
-                    st.info("Chưa có đóng góp nào")
-            else:
-                st.info("Chưa có dữ liệu tài chính")
+    # Charts using custom HTML/CSS
+    col1, col2 = st.columns(2)
     
-    # Recent activities
+    with col1:
+        if not rankings_df.empty:
+            chart_html = create_horizontal_bar_chart(rankings_df, "🏆 Top 5 thành viên xuất sắc")
+            st.markdown(chart_html, unsafe_allow_html=True)
+        else:
+            st.info("Chưa có dữ liệu ranking")
+    
+    with col2:
+        if not financial_df.empty and financial_df['total_contribution'].sum() > 0:
+            # Show top contributors
+            contrib_data = financial_df[financial_df['total_contribution'] > 0].head(5)
+            if not contrib_data.empty:
+                chart_html = create_horizontal_bar_chart(
+                    contrib_data[['full_name', 'total_contribution']], 
+                    "💰 Top 5 thành viên đóng góp nhiều"
+                )
+                st.markdown(chart_html, unsafe_allow_html=True)
+            else:
+                st.info("Chưa có đóng góp nào")
+        else:
+            st.info("Chưa có dữ liệu tài chính")
+    
+    # Recent activities (chỉ thành viên)
     st.subheader("📈 Hoạt động gần đây")
     
     conn = sqlite3.connect('pickleball_club.db')
     recent_activities = pd.read_sql_query('''
         SELECT 'Thành viên mới' as activity_type, u.full_name as details, u.approved_at as activity_date
-        FROM users u WHERE u.is_approved = 1 AND u.approved_at IS NOT NULL
+        FROM users u WHERE u.is_approved = 1 AND u.approved_at IS NOT NULL AND u.is_admin = 0
         UNION ALL
         SELECT 'Vote tham gia' as activity_type, u.full_name as details, v.created_at as activity_date
-        FROM votes v JOIN users u ON v.user_id = u.id
+        FROM votes v JOIN users u ON v.user_id = u.id WHERE u.is_admin = 0
         UNION ALL
         SELECT 'Đóng quỹ' as activity_type, u.full_name || ' - ' || f.amount || ' VNĐ' as details, f.created_at as activity_date
-        FROM finances f JOIN users u ON f.user_id = u.id WHERE f.transaction_type = 'contribution'
+        FROM finances f JOIN users u ON f.user_id = u.id WHERE f.transaction_type = 'contribution' AND u.is_admin = 0
         ORDER BY activity_date DESC
         LIMIT 10
     ''', conn)
@@ -746,6 +889,7 @@ def show_members_page():
         st.info("Chưa có thành viên nào được phê duyệt")
     else:
         st.subheader(f"📊 Tổng số: {len(members_df)} thành viên")
+        st.caption("*Không bao gồm quản trị viên trong danh sách")
         
         # Add search functionality
         search_term = st.text_input("🔍 Tìm kiếm thành viên", placeholder="Nhập tên để tìm kiếm...")
@@ -808,6 +952,7 @@ def show_ranking_page():
         st.info("Chưa có dữ liệu xếp hạng")
     else:
         st.subheader("📈 Bảng xếp hạng")
+        st.caption("*Chỉ thống kê thành viên, không bao gồm quản trị viên")
         
         # Create ranking cards
         for idx, (_, player) in enumerate(rankings_df.iterrows(), 1):
@@ -820,23 +965,10 @@ def show_ranking_page():
                 </div>
             """, unsafe_allow_html=True)
         
-        # Chart using matplotlib
+        # Chart using custom HTML
         if len(rankings_df) > 1:
-            st.subheader("📊 Biểu đồ xếp hạng")
-            top_10 = rankings_df.head(10)
-            fig, ax = plt.subplots(figsize=(12, 8))
-            bars = ax.bar(range(len(top_10)), top_10['total_wins'])
-            ax.set_xticks(range(len(top_10)))
-            ax.set_xticklabels(top_10['full_name'], rotation=45, ha='right')
-            ax.set_ylabel('Số trận thắng')
-            ax.set_title('Top 10 thành viên xuất sắc')
-            
-            # Color gradient for bars
-            for i, bar in enumerate(bars):
-                bar.set_color(plt.cm.viridis(1 - i / len(bars)))
-            
-            plt.tight_layout()
-            st.pyplot(fig, clear_figure=True)
+            chart_html = create_horizontal_bar_chart(rankings_df.head(10), "📊 Top 10 thành viên xuất sắc")
+            st.markdown(chart_html, unsafe_allow_html=True)
 
 def show_voting_page():
     st.title("🗳️ Bình chọn tham gia")
@@ -868,6 +1000,7 @@ def show_voting_page():
         st.info("Chưa có phiên bình chọn nào")
     else:
         st.subheader("📋 Các phiên bình chọn")
+        st.caption("*Chỉ thống kê vote của thành viên")
         
         for _, session in vote_sessions.iterrows():
             session_date_formatted = pd.to_datetime(session['session_date']).strftime('%d/%m/%Y')
@@ -880,18 +1013,22 @@ def show_voting_page():
                         <div class="vote-card">
                             <h4>📅 {session_date_formatted}</h4>
                             <p>📝 {session['description']}</p>
-                            <p>👥 <strong>{session['vote_count']}</strong> người tham gia</p>
+                            <p>👥 <strong>{session['vote_count']}</strong> thành viên tham gia</p>
                         </div>
                     """, unsafe_allow_html=True)
                 
                 with col2:
-                    if st.button("🗳️ Vote", key=f"vote_{session['id']}", use_container_width=True):
-                        success = vote_for_session(st.session_state.user['id'], session['session_date'])
-                        if success:
-                            st.success("Đã vote thành công!")
-                            st.rerun()
-                        else:
-                            st.warning("Bạn đã vote cho phiên này!")
+                    # Chỉ thành viên mới có thể vote
+                    if not st.session_state.user['is_admin']:
+                        if st.button("🗳️ Vote", key=f"vote_{session['id']}", use_container_width=True):
+                            success = vote_for_session(st.session_state.user['id'], session['session_date'])
+                            if success:
+                                st.success("Đã vote thành công!")
+                                st.rerun()
+                            else:
+                                st.warning("Bạn đã vote cho phiên này!")
+                    else:
+                        st.info("Admin không thể vote")
                 
                 with col3:
                     if st.button("👁️ Chi tiết", key=f"detail_{session['id']}", use_container_width=True):
@@ -908,7 +1045,7 @@ def show_voting_page():
                                         </div>
                                     """, unsafe_allow_html=True)
                             else:
-                                st.info("Chưa có ai vote cho phiên này")
+                                st.info("Chưa có thành viên nào vote cho phiên này")
 
 def show_finance_page():
     st.title("💰 Quản lý tài chính")
@@ -960,6 +1097,7 @@ def show_finance_page():
         st.info("Chưa có dữ liệu tài chính")
     else:
         st.subheader("📊 Tổng quan tài chính")
+        st.caption("*Chỉ thống kê tài chính của thành viên, không bao gồm quản trị viên")
         
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -1000,39 +1138,24 @@ def show_finance_page():
             use_container_width=True
         )
         
-        # Charts using matplotlib
-        if len(financial_df) > 1:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("📊 Số dư thành viên")
-                fig, ax = plt.subplots(figsize=(10, 6))
-                colors = ['green' if x >= 0 else 'red' for x in financial_df['balance']]
-                bars = ax.bar(range(len(financial_df)), financial_df['balance'], color=colors, alpha=0.7)
-                ax.set_xticks(range(len(financial_df)))
-                ax.set_xticklabels(financial_df['full_name'], rotation=45, ha='right')
-                ax.set_ylabel('Số dư (VNĐ)')
-                ax.set_title('Số dư của từng thành viên')
-                ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
-                plt.tight_layout()
-                st.pyplot(fig, clear_figure=True)
-            
-            with col2:
-                st.subheader("📊 Đóng góp vs Tham gia")
-                fig, ax = plt.subplots(figsize=(10, 6))
-                scatter = ax.scatter(financial_df['sessions_attended'], financial_df['total_contribution'], 
-                                   s=100, alpha=0.7, c=range(len(financial_df)), cmap='viridis')
-                ax.set_xlabel('Số buổi tham gia')
-                ax.set_ylabel('Tổng đóng góp (VNĐ)')
-                ax.set_title('Mối quan hệ đóng góp vs tham gia')
-                
-                # Add member names as annotations
-                for i, txt in enumerate(financial_df['full_name']):
-                    ax.annotate(txt[:10], (financial_df.iloc[i]['sessions_attended'], 
-                                         financial_df.iloc[i]['total_contribution']), 
-                               fontsize=8, alpha=0.7)
-                plt.tight_layout()
-                st.pyplot(fig, clear_figure=True)
+        # Charts using custom HTML
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            chart_html = create_balance_chart(financial_df)
+            st.markdown(chart_html, unsafe_allow_html=True)
+        
+        with col2:
+            # Top contributors chart
+            contrib_data = financial_df[financial_df['total_contribution'] > 0].head(5)
+            if not contrib_data.empty:
+                chart_html = create_horizontal_bar_chart(
+                    contrib_data[['full_name', 'total_contribution']], 
+                    "💰 Top 5 thành viên đóng góp"
+                )
+                st.markdown(chart_html, unsafe_allow_html=True)
+            else:
+                st.info("Chưa có đóng góp nào")
 
 def show_alerts_page():
     st.title("⚠️ Cảnh báo hệ thống")
@@ -1044,6 +1167,7 @@ def show_alerts_page():
         st.balloons()
     else:
         st.subheader(f"🚨 Có {len(alerts)} cảnh báo cần chú ý")
+        st.caption("*Chỉ cảnh báo liên quan đến thành viên")
         
         for alert in alerts:
             if "số dư thấp" in alert:
@@ -1073,14 +1197,15 @@ def show_alerts_page():
         st.metric("⏳ Chờ phê duyệt", pending_count)
     
     with col2:
-        cursor.execute('SELECT COUNT(*) FROM users WHERE is_approved = 1')
+        cursor.execute('SELECT COUNT(*) FROM users WHERE is_approved = 1 AND is_admin = 0')
         approved_count = cursor.fetchone()[0]
         st.metric("✅ Thành viên active", approved_count)
     
     with col3:
         cursor.execute('''
-            SELECT COUNT(*) FROM votes 
-            WHERE created_at >= datetime('now', '-7 days')
+            SELECT COUNT(*) FROM votes v
+            JOIN users u ON v.user_id = u.id
+            WHERE v.created_at >= datetime('now', '-7 days') AND u.is_admin = 0
         ''')
         recent_votes = cursor.fetchone()[0]
         st.metric("🗳️ Vote tuần này", recent_votes)
