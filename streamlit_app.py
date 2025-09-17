@@ -82,7 +82,7 @@ def login():
                         st.session_state['user_email'] = email
                         st.session_state['user_role'] = user['role']
                         st.success(f"Chào mừng {user['name']}!")
-                       st.rerun()
+                       st.experimental_rerun()
                     else:
                         st.error("⚠️ Tài khoản chưa được phê duyệt. Vui lòng chờ quản trị viên.")
                 else:
