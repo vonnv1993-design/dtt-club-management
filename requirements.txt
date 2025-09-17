@@ -1,7 +1,6 @@
 streamlit
 pandas
-reportlab
-matplotlib
-openpyxl
 plotly
-numpy
+sqlite3
+hashlib
+datetime
