@@ -4,3 +4,4 @@ reportlab
 matplotlib
 openpyxl
 plotly
+numpy
