@@ -74,6 +74,15 @@ st.markdown("""
         border-left: 3px solid #28a745;
     }
     
+    .pending-card {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid #f39c12;
+    }
+    
     .alert-card {
         background: #fff3cd;
         border: 1px solid #ffeaa7;
@@ -151,7 +160,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# DATA PERSISTENCE SYSTEM - SỬ DỤNG SESSION STATE VÀ JSON
+# DATA PERSISTENCE SYSTEM
 def init_data_storage():
     """Khởi tạo hệ thống lưu trữ dữ liệu persistent"""
     if 'data_initialized' not in st.session_state:
@@ -181,14 +190,8 @@ def init_data_storage():
             'next_finance_id': 1
         }
         
-        # Khởi tạo dữ liệu
         st.session_state.club_data = default_data
         st.session_state.data_initialized = True
-
-def save_data_to_session():
-    """Lưu dữ liệu vào session state"""
-    # Dữ liệu đã được lưu trong st.session_state.club_data
-    pass
 
 def get_data():
     """Lấy dữ liệu từ session state"""
@@ -225,8 +228,8 @@ def register_user(full_name, email, phone, birth_date, password):
             'phone': phone,
             'birth_date': str(birth_date),
             'password': hash_password(password),
-            'is_approved': 0,
-            'is_admin': 0,
+            'is_approved': 0,  # ĐẶT LẠI CHƯA ĐƯỢC PHÊ DUYỆT
+            'is_admin': 0,     # KHÔNG PHẢI ADMIN
             'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
@@ -255,10 +258,24 @@ def login_user(email, password):
     except Exception as e:
         return False, f"Lỗi đăng nhập: {str(e)}"
 
-# Data helper functions
+# Data helper functions - SỬA LẠI ĐỂ HIỂN THị ĐÚNG
 def get_pending_members():
+    """Lấy danh sách thành viên chờ phê duyệt"""
     data = get_data()
-    pending = [user for user in data['users'] if user['is_approved'] == 0 and user['is_admin'] == 0]
+    
+    # Debug: In ra tất cả users để kiểm tra
+    st.sidebar.write("🔍 Debug - Tất cả users:")
+    for user in data['users']:
+        st.sidebar.write(f"- {user['full_name']}: approved={user['is_approved']}, admin={user['is_admin']}")
+    
+    # Lọc users chờ phê duyệt (is_approved=0 và is_admin=0)
+    pending = []
+    for user in data['users']:
+        if user['is_approved'] == 0 and user['is_admin'] == 0:
+            pending.append(user)
+    
+    st.sidebar.write(f"🎯 Tìm thấy {len(pending)} users chờ phê duyệt")
+    
     return pd.DataFrame(pending)
 
 def get_approved_members():
@@ -283,8 +300,11 @@ def approve_member(user_id, admin_name):
 def reject_member(user_id):
     try:
         data = get_data()
+        # Xóa user khỏi danh sách
+        original_count = len(data['users'])
         data['users'] = [user for user in data['users'] if user['id'] != user_id]
-        return True
+        new_count = len(data['users'])
+        return new_count < original_count  # Trả về True nếu đã xóa thành công
     except Exception as e:
         st.error(f"Lỗi từ chối: {str(e)}")
         return False
@@ -653,6 +673,52 @@ def create_balance_chart(data):
         """
     return chart_html
 
+# THÊM HÀM TẠO DỮ LIỆU MẪU ĐỂ TEST
+def create_sample_data():
+    """Tạo dữ liệu mẫu để test"""
+    if st.sidebar.button("🧪 Tạo dữ liệu mẫu"):
+        data = get_data()
+        
+        # Thêm một vài user mẫu chờ phê duyệt
+        sample_users = [
+            {
+                'id': get_next_id('user'),
+                'full_name': 'Nguyễn Văn A',
+                'email': 'nguyenvana@gmail.com',
+                'phone': '0123456789',
+                'birth_date': '1990-05-15',
+                'password': hash_password('123456'),
+                'is_approved': 0,  # Chờ phê duyệt
+                'is_admin': 0,
+                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            },
+            {
+                'id': get_next_id('user'),
+                'full_name': 'Trần Thị B',
+                'email': 'tranthib@gmail.com',
+                'phone': '0987654321',
+                'birth_date': '1992-08-20',
+                'password': hash_password('123456'),
+                'is_approved': 0,  # Chờ phê duyệt
+                'is_admin': 0,
+                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+        ]
+        
+        for user in sample_users:
+            # Kiểm tra email chưa tồn tại
+            email_exists = False
+            for existing_user in data['users']:
+                if existing_user['email'] == user['email']:
+                    email_exists = True
+                    break
+            
+            if not email_exists:
+                data['users'].append(user)
+        
+        st.sidebar.success("Đã tạo dữ liệu mẫu!")
+        st.rerun()
+
 # Initialize data storage
 init_data_storage()
 
@@ -672,6 +738,9 @@ def main():
             <p>Hệ thống quản lý câu lạc bộ Pickleball chuyên nghiệp</p>
         </div>
     """, unsafe_allow_html=True)
+    
+    # Hiển thị nút tạo dữ liệu mẫu trong sidebar để test
+    create_sample_data()
     
     if not st.session_state.logged_in:
         show_auth_page()
@@ -700,7 +769,7 @@ def show_auth_page():
                 else:
                     st.error("Vui lòng nhập đầy đủ thông tin!")
         
-        st.info("💡 Cần hỗ trợ xin liên hệ vonnv")
+        st.info("💡 Cần hỗ trợ liên hệ Vonnv")
     
     with tab2:
         st.subheader("Đăng ký thành viên mới")
@@ -840,7 +909,7 @@ def show_home_page():
     
     # Data persistence info
     st.subheader("📊 Thông tin hệ thống")
-    st.info("💾 **Dữ liệu được lưu trữ persistent**: Khi reboot app, dữ liệu sẽ được giữ lại trong session của bạn. Để reset hoàn toàn, vui lòng xóa cache trình duyệt hoặc mở tab ẩn danh mới.")
+    st.info("💾 **Dữ liệu được lưu trữ persistent**: Khi reboot app, dữ liệu sẽ được giữ lại trong session của bạn.")
     
     # Show current data stats
     data = get_data()
@@ -865,10 +934,23 @@ def show_approval_page():
     
     st.title("✅ Phê duyệt thành viên")
     
+    # HIỂN THỊ DEBUG INFO
+    data = get_data()
+    st.info(f"🔍 Debug: Tổng {len(data['users'])} users trong hệ thống")
+    
     pending_members = get_pending_members()
+    
+    st.info(f"📋 Kết quả tìm kiếm: {len(pending_members)} thành viên chờ phê duyệt")
     
     if pending_members.empty:
         st.success("🎉 Không có thành viên nào cần phê duyệt!")
+        
+        # Hiển thị tất cả users để debug
+        st.subheader("🔧 Debug - Tất cả users trong hệ thống:")
+        for user in data['users']:
+            status = "✅ Đã phê duyệt" if user['is_approved'] == 1 else "⏳ Chờ phê duyệt"
+            role = "👑 Admin" if user['is_admin'] == 1 else "👤 Thành viên"
+            st.write(f"- **{user['full_name']}** ({user['email']}) - {status} - {role}")
     else:
         st.subheader(f"📋 Có {len(pending_members)} thành viên chờ phê duyệt")
         
@@ -878,7 +960,7 @@ def show_approval_page():
                 
                 with col1:
                     st.markdown(f"""
-                        <div class="member-card">
+                        <div class="pending-card">
                             <strong>👤 {member['full_name']}</strong><br>
                             📧 {member['email']}<br>
                             📱 {member['phone']}<br>
@@ -894,12 +976,16 @@ def show_approval_page():
                         if approve_member(member['id'], st.session_state.user['name']):
                             st.success(f"Đã phê duyệt {member['full_name']}")
                             st.rerun()
+                        else:
+                            st.error("Lỗi phê duyệt!")
                 
                 with col4:
                     if st.button("❌ Từ chối", key=f"reject_{member['id']}", use_container_width=True):
                         if reject_member(member['id']):
                             st.warning(f"Đã từ chối {member['full_name']}")
                             st.rerun()
+                        else:
+                            st.error("Lỗi từ chối!")
                 
                 st.markdown("---")
 
