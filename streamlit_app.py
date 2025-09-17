@@ -27,11 +27,13 @@ def save_all():
     save_json(USERS_FILE, st.session_state.users)
     save_json(VOTES_FILE, st.session_state.votes)
     save_json(EXPENSES_FILE, st.session_state.expenses)
+    save_json(MATCHES_FILE, st.session_state.matches)
 
 # --- Đường dẫn file dữ liệu ---
 USERS_FILE = "users.json"
 VOTES_FILE = "votes.json"
 EXPENSES_FILE = "expenses.json"
+MATCHES_FILE = "matches.json"  # Lưu thông tin trận thắng chi tiết
 
 # --- Dữ liệu mặc định admin ---
 default_users = {
@@ -60,6 +62,9 @@ if 'votes' not in st.session_state:
 
 if 'expenses' not in st.session_state:
     st.session_state.expenses = load_json(EXPENSES_FILE, [])
+
+if 'matches' not in st.session_state:
+    st.session_state.matches = load_json(MATCHES_FILE, [])
 
 # --- Hàm đăng nhập ---
 def login():
@@ -169,23 +174,59 @@ def tab_ranking():
     if not members:
         st.info("Chưa có thành viên nào được phê duyệt.")
         return
+
     df = pd.DataFrame(members)
     df = df[['name', 'wins']]
     df = df.sort_values(by='wins', ascending=False)
     df.columns = ['Tên', 'Số trận thắng']
     st.dataframe(df.style.bar(subset=['Số trận thắng'], color='#4CAF50'))
 
+    st.subheader("Chi tiết trận thắng")
+    matches = st.session_state.matches
+    if not matches:
+        st.info("Chưa có trận thắng nào được nhập.")
+    else:
+        member_emails = [email for email, u in users.items() if u['role']=='member' and u['approved']]
+        member_email = st.selectbox("Chọn thành viên", options=member_emails)
+        member_name = users[member_email]['name']
+        member_matches = [m for m in matches if m['player_email'] == member_email]
+        if not member_matches:
+            st.info(f"{member_name} chưa có trận thắng nào được nhập.")
+        else:
+            df_match = pd.DataFrame(member_matches)
+            df_match_display = df_match.rename(columns={
+                'date': 'Ngày thắng',
+                'location': 'Địa điểm',
+                'score': 'Tỉ số',
+                'min_wins': 'Số trận thắng tối thiểu'
+            })
+            df_match_display = df_match_display[['Ngày thắng', 'Địa điểm', 'Tỉ số', 'Số trận thắng tối thiểu']]
+            st.dataframe(df_match_display)
+
     if st.session_state.user_role == 'admin':
-        st.subheader("Nhập trận thắng cho thành viên")
+        st.subheader("Nhập trận thắng mới cho thành viên")
         with st.form("input_wins"):
-            member_email = st.selectbox("Chọn thành viên", options=[email for email, u in st.session_state.users.items() if u['role']=='member' and u['approved']])
-            wins_add = st.number_input("Số trận thắng thêm", min_value=0, step=1)
-            submitted = st.form_submit_button("Cập nhật")
+            member_email = st.selectbox("Chọn thành viên", options=[email for email, u in users.items() if u['role']=='member' and u['approved']])
+            min_wins = st.number_input("Số trận thắng tối thiểu", min_value=1, step=1)
+            date_str = st.date_input("Ngày trận thắng", value=datetime.today())
+            location = st.text_input("Địa điểm")
+            score = st.text_input("Tỉ số trận thắng (ví dụ 21:15)")
+            submitted = st.form_submit_button("Thêm trận thắng")
             if submitted:
-                st.session_state.users[member_email]['wins'] += wins_add
-                save_all()
-                st.success("Cập nhật thành công!")
-                st.rerun()
+                if not location or not score:
+                    st.error("Vui lòng nhập đầy đủ địa điểm và tỉ số trận thắng.")
+                else:
+                    st.session_state.users[member_email]['wins'] += min_wins
+                    st.session_state.matches.append({
+                        'player_email': member_email,
+                        'min_wins': min_wins,
+                        'date': date_str.strftime("%Y-%m-%d"),
+                        'location': location,
+                        'score': score
+                    })
+                    save_all()
+                    st.success("Đã thêm trận thắng thành công!")
+                    st.rerun()
 
 # --- Tab Vote tham gia chơi ---
 def tab_vote():
@@ -194,6 +235,18 @@ def tab_vote():
         st.subheader("Tạo bình chọn mới")
         with st.form("create_vote"):
             date_vote = st.date_input("Chọn ngày tham gia", value=datetime.today())
+            weekday = date_vote.strftime("%A")
+            weekday_map = {
+                "Monday": "Thứ Hai",
+                "Tuesday": "Thứ Ba",
+                "Wednesday": "Thứ Tư",
+                "Thursday": "Thứ Năm",
+                "Friday": "Thứ Sáu",
+                "Saturday": "Thứ Bảy",
+                "Sunday": "Chủ Nhật"
+            }
+            weekday_vn = weekday_map.get(weekday, weekday)
+            description = st.text_area("Mô tả bình chọn (ví dụ: Buổi tập kỹ thuật, giao hữu...)")
             submitted = st.form_submit_button("Tạo bình chọn")
             if submitted:
                 for v in st.session_state.votes:
@@ -201,7 +254,12 @@ def tab_vote():
                         st.warning("Đã có bình chọn cho ngày này.")
                         break
                 else:
-                    st.session_state.votes.append({'date': date_vote.strftime("%Y-%m-%d"), 'voters': []})
+                    st.session_state.votes.append({
+                        'date': date_vote.strftime("%Y-%m-%d"),
+                        'weekday': weekday_vn,
+                        'description': description,
+                        'voters': []
+                    })
                     save_all()
                     st.success("Tạo bình chọn thành công!")
                     st.rerun()
@@ -214,20 +272,23 @@ def tab_vote():
         for vote in st.session_state.votes:
             date_str = vote['date']
             voted = st.session_state.user_email in vote['voters']
-            if voted:
-                st.markdown(f"- ✅ Bạn đã tham gia bình chọn ngày **{date_str}**")
-            else:
-                if st.button(f"Tham gia ngày {date_str}", key=date_str):
-                    vote['voters'].append(st.session_state.user_email)
-                    save_all()
-                    st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
-                    st.rerun()
+            desc = vote.get('description', '')
+            weekday = vote.get('weekday', '')
+            with st.expander(f"{weekday} - {date_str} - {desc}"):
+                if voted:
+                    st.markdown(f"- ✅ Bạn đã tham gia bình chọn ngày **{date_str}**")
+                else:
+                    if st.button(f"Tham gia ngày {date_str}", key=date_str):
+                        vote['voters'].append(st.session_state.user_email)
+                        save_all()
+                        st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
+                        st.rerun()
 
     st.subheader("Thống kê số lượng vote tham gia")
     if not st.session_state.votes:
         st.info("Chưa có bình chọn nào.")
         return
-    data = [{'Ngày': v['date'], 'Số lượng tham gia': len(v['voters'])} for v in st.session_state.votes]
+    data = [{'Ngày': v['date'], 'Thứ': v.get('weekday', ''), 'Mô tả': v.get('description', ''), 'Số lượng tham gia': len(v['voters'])} for v in st.session_state.votes]
     df = pd.DataFrame(data).sort_values(by='Ngày', ascending=False)
     st.dataframe(df.style.bar(subset=['Số lượng tham gia'], color='#2196F3'))
 
@@ -274,8 +335,36 @@ def tab_finance():
         st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
 
     st.subheader("Số dư tài chính các thành viên")
-    df = pd.DataFrame([{'Tên': users[email]['name'], 'Số tiền còn lại (VNĐ)': users[email]['balance']} for email in members])
-    st.dataframe(df.style.format({"Số tiền còn lại (VNĐ)": "{:,.0f}"}).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800'))
+    attendance_count = {email: 0 for email in members}
+    for vote in st.session_state.votes:
+        for voter in vote['voters']:
+            if voter in attendance_count:
+                attendance_count[voter] += 1
+
+    total_expense = sum(e['amount'] for e in st.session_state.expenses)
+    total_sessions = len(st.session_state.votes) if st.session_state.votes else 1
+    avg_cost_per_session = total_expense / total_sessions if total_sessions > 0 else 0
+
+    data = []
+    for email in members:
+        name = users[email]['name']
+        balance = users[email]['balance']
+        sessions = attendance_count.get(email, 0)
+        need_pay = sessions * avg_cost_per_session
+        data.append({
+            'Tên': name,
+            'Buổi tập': sessions,
+            'Số tiền cần đóng góp (VNĐ)': need_pay,
+            'Số tiền còn lại (VNĐ)': balance
+        })
+
+    df = pd.DataFrame(data)
+    st.dataframe(
+        df.style.format({
+            "Số tiền cần đóng góp (VNĐ)": "{:,.0f}",
+            "Số tiền còn lại (VNĐ)": "{:,.0f}"
+        }).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800')
+    )
 
 # --- Tab Home: biểu đồ thống kê ---
 def tab_home():
@@ -306,14 +395,7 @@ def tab_home():
         vote_counts = {email:0 for email in users}
         for vote in st.session_state.votes:
             for v in vote['voters']:
-                vote_counts[v] = vote_counts.get(v, 0) + 1
-        df_vote = pd.DataFrame([
-            {'name': users[email]['name'], 'votes': count}
-            for email, count in vote_counts.items() if users[email]['role']=='member' and users[email]['approved']
-        ])
-        df_vote = df_vote.sort_values(by='votes', ascending=False).head(10)
-        st.bar_chart(df_vote.set_index('name'))
-
+                vote_counts[v] = vote_counts.get(v,
 # --- Main app ---
 def main():
     st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
