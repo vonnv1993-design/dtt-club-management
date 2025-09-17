@@ -395,7 +395,7 @@ def tab_home():
         vote_counts = {email:0 for email in users}
         for vote in st.session_state.votes:
             for v in vote['voters']:
-                vote_counts[v] = vote_counts.get(v,
+                vote_counts[v] = vote_counts.get(v, 0) + 1
 # --- Main app ---
 def main():
     st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
