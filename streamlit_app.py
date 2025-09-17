@@ -3,8 +3,8 @@ import sqlite3
 import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
-import plotly.express as px
-import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Page configuration
 st.set_page_config(
@@ -82,10 +82,6 @@ st.markdown("""
         border-radius: 10px;
         margin: 10px 0;
         border-left: 4px solid #dc3545;
-    }
-    
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1f4e79 0%, #2d5a87 100%);
     }
     
     .vote-card {
@@ -627,28 +623,29 @@ def show_home_page():
             </div>
         """, unsafe_allow_html=True)
     
-    # Charts
+    # Charts using matplotlib instead of plotly
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("🏆 Top thành viên có nhiều trận thắng")
         if not rankings_df.empty:
             top_5 = rankings_df.head(5)
-            fig = px.bar(top_5, x='total_wins', y='full_name', orientation='h',
-                        title="Top 5 thành viên xuất sắc",
-                        color='total_wins',
-                        color_continuous_scale='Blues')
-            fig.update_layout(height=400, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.barh(top_5['full_name'], top_5['total_wins'], color='skyblue')
+            ax.set_xlabel('Số trận thắng')
+            ax.set_title('Top 5 thành viên xuất sắc')
+            plt.tight_layout()
+            st.pyplot(fig)
         else:
             st.info("Chưa có dữ liệu ranking")
     
     with col2:
         st.subheader("💰 Tình hình tài chính")
         if not financial_df.empty:
-            fig = px.pie(financial_df, values='total_contribution', names='full_name',
-                        title="Tỷ lệ đóng góp của thành viên")
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.pie(financial_df['total_contribution'], labels=financial_df['full_name'], autopct='%1.1f%%')
+            ax.set_title('Tỷ lệ đóng góp của thành viên')
+            st.pyplot(fig)
         else:
             st.info("Chưa có dữ liệu tài chính")
     
@@ -803,14 +800,18 @@ def show_ranking_page():
                 </div>
             """, unsafe_allow_html=True)
         
-        # Chart
+        # Chart using matplotlib
         if len(rankings_df) > 1:
-            fig = px.bar(rankings_df.head(10), x='full_name', y='total_wins',
-                        title="Top 10 thành viên xuất sắc",
-                        color='total_wins',
-                        color_continuous_scale='Viridis')
-            fig.update_layout(height=500)
-            st.plotly_chart(fig, use_container_width=True)
+            st.subheader("📊 Biểu đồ xếp hạng")
+            fig, ax = plt.subplots(figsize=(12, 8))
+            top_10 = rankings_df.head(10)
+            ax.bar(range(len(top_10)), top_10['total_wins'], color='lightcoral')
+            ax.set_xticks(range(len(top_10)))
+            ax.set_xticklabels(top_10['full_name'], rotation=45, ha='right')
+            ax.set_ylabel('Số trận thắng')
+            ax.set_title('Top 10 thành viên xuất sắc')
+            plt.tight_layout()
+            st.pyplot(fig)
 
 def show_voting_page():
     st.title("🗳️ Bình chọn tham gia")
@@ -971,24 +972,31 @@ def show_finance_page():
             use_container_width=True
         )
         
-        # Charts
+        # Charts using matplotlib
         col1, col2 = st.columns(2)
         
         with col1:
-            fig = px.bar(financial_df, x='full_name', y='balance',
-                        title="Số dư của từng thành viên",
-                        color='balance',
-                        color_continuous_scale='RdYlBu')
-            fig.update_xaxis(tickangle=45)
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            st.subheader("📊 Số dư thành viên")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            colors = ['green' if x >= 0 else 'red' for x in financial_df['balance']]
+            ax.bar(range(len(financial_df)), financial_df['balance'], color=colors)
+            ax.set_xticks(range(len(financial_df)))
+            ax.set_xticklabels(financial_df['full_name'], rotation=45, ha='right')
+            ax.set_ylabel('Số dư (VNĐ)')
+            ax.set_title('Số dư của từng thành viên')
+            plt.tight_layout()
+            st.pyplot(fig)
         
         with col2:
-            fig = px.scatter(financial_df, x='sessions_attended', y='total_contribution',
-                           size='total_contribution', hover_name='full_name',
-                           title="Mối quan hệ đóng góp vs tham gia")
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            st.subheader("📊 Mối quan hệ đóng góp vs tham gia")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.scatter(financial_df['sessions_attended'], financial_df['total_contribution'], 
+                      s=100, alpha=0.7, color='skyblue')
+            ax.set_xlabel('Số buổi tham gia')
+            ax.set_ylabel('Tổng đóng góp (VNĐ)')
+            ax.set_title('Mối quan hệ đóng góp vs tham gia')
+            plt.tight_layout()
+            st.pyplot(fig)
 
 def show_alerts_page():
     st.title("⚠️ Cảnh báo hệ thống")
