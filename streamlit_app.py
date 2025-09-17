@@ -1,682 +1,1066 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
+import sqlite3
 import hashlib
-import json
-import os
+import pandas as pd
+from datetime import datetime, timedelta
+import plotly.express as px
+import plotly.graph_objects as go
 
-# --- Hàm băm mật khẩu ---
+# Page configuration
+st.set_page_config(
+    page_title="DTT PICKLEBALL CLUB",
+    page_icon="🏓",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for modern, responsive design
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(90deg, #1f4e79 0%, #2d5a87 100%);
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        color: white;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        border-left: 4px solid #1f4e79;
+        margin: 10px 0;
+    }
+    
+    .stat-number {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f4e79;
+        margin: 0;
+    }
+    
+    .stat-label {
+        color: #666;
+        font-size: 0.9rem;
+        margin-top: 5px;
+    }
+    
+    .member-card {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 3px solid #28a745;
+    }
+    
+    .alert-card {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid #f39c12;
+    }
+    
+    .success-card {
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid #28a745;
+    }
+    
+    .danger-card {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid #dc3545;
+    }
+    
+    .sidebar .sidebar-content {
+        background: linear-gradient(180deg, #1f4e79 0%, #2d5a87 100%);
+    }
+    
+    .vote-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        margin: 15px 0;
+        border: 1px solid #e9ecef;
+    }
+    
+    .ranking-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 15px;
+        margin: 10px 0;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+    
+    @media (max-width: 768px) {
+        .stat-card {
+            margin: 5px 0;
+            padding: 15px;
+        }
+        .stat-number {
+            font-size: 2rem;
+        }
+        .main-header {
+            padding: 15px;
+        }
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Database initialization
+def init_database():
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    # Users table (for authentication)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            phone TEXT NOT NULL,
+            birth_date DATE NOT NULL,
+            password TEXT NOT NULL,
+            is_approved INTEGER DEFAULT 0,
+            is_admin INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            approved_at TIMESTAMP,
+            approved_by TEXT
+        )
+    ''')
+    
+    # Rankings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS rankings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            wins INTEGER DEFAULT 0,
+            match_date DATE,
+            location TEXT,
+            score TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Votes table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            vote_date DATE,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Vote sessions table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS vote_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_date DATE,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Finances table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS finances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            amount INTEGER,
+            transaction_type TEXT,
+            description TEXT,
+            session_date DATE,
+            court_fee INTEGER DEFAULT 0,
+            water_fee INTEGER DEFAULT 0,
+            other_fee INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Insert default admin user
+    cursor.execute('''
+        INSERT OR IGNORE INTO users (full_name, email, phone, birth_date, password, is_approved, is_admin)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', ('Administrator', 'admin@local', '0000000000', '1990-01-01', 
+          hashlib.sha256('Admin@123'.encode()).hexdigest(), 1, 1))
+    
+    conn.commit()
+    conn.close()
+
+# Authentication functions
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-# --- Hàm đọc/ghi JSON ---
-def load_json(filename, default_data):
-    if os.path.exists(filename):
-        with open(filename, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    else:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(default_data, f, ensure_ascii=False, indent=2)
-        return default_data
+def verify_password(password, hashed):
+    return hash_password(password) == hashed
 
-def save_json(filename, data):
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def register_user(full_name, email, phone, birth_date, password):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            INSERT INTO users (full_name, email, phone, birth_date, password)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (full_name, email, phone, birth_date, hash_password(password)))
+        conn.commit()
+        return True, "Đăng ký thành công! Vui lòng chờ admin phê duyệt."
+    except sqlite3.IntegrityError:
+        return False, "Email đã tồn tại!"
+    finally:
+        conn.close()
 
-def save_all():
-    save_json(USERS_FILE, st.session_state.users)
-    save_json(VOTES_FILE, st.session_state.votes)
-    save_json(EXPENSES_FILE, st.session_state.expenses)
-    save_json(MATCHES_FILE, st.session_state.matches)
-
-# --- Đường dẫn file dữ liệu ---
-USERS_FILE = "users.json"
-VOTES_FILE = "votes.json"
-EXPENSES_FILE = "expenses.json"
-MATCHES_FILE = "matches.json"
-
-# --- Dữ liệu mặc định admin ---
-default_users = {
-    "admin@local": {
-        "name": "Admin",
-        "phone": "",
-        "password_hash": hash_password("Admin@123"),
-        "role": "admin",
-        "approved": True,
-        "wins": 0,
-        "balance": 0,
-        "votes": []
-    }
-}
-
-# --- Khởi tạo dữ liệu ---
-if 'users' not in st.session_state:
-    st.session_state.users = load_json(USERS_FILE, default_users)
-
-if 'pending_users' not in st.session_state:
-    pending = {email: u for email, u in st.session_state.users.items() if not u.get('approved', False)}
-    st.session_state.pending_users = pending
-
-if 'votes' not in st.session_state:
-    st.session_state.votes = load_json(VOTES_FILE, [])
-
-if 'expenses' not in st.session_state:
-    st.session_state.expenses = load_json(EXPENSES_FILE, [])
-
-if 'matches' not in st.session_state:
-    st.session_state.matches = load_json(MATCHES_FILE, [])
-
-if 'vote_history' not in st.session_state:
-    st.session_state.vote_history = []
-
-# --- Hàm lấy tên ngày tiếng Việt ---
-def get_weekday_vn(date_obj):
-    weekday_map = {
-        "Monday": "Thứ Hai",
-        "Tuesday": "Thứ Ba",
-        "Wednesday": "Thứ Tư",
-        "Thursday": "Thứ Năm",
-        "Friday": "Thứ Sáu",
-        "Saturday": "Thứ Bảy",
-        "Sunday": "Chủ Nhật"
-    }
-    return weekday_map.get(date_obj.strftime("%A"), date_obj.strftime("%A"))
-
-# --- Hàm thêm lịch sử sửa bình chọn ---
-def add_vote_history(action, description):
-    st.session_state.vote_history.append({
-        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'action': action,
-        'description': description
-    })
-
-# --- Hàm đăng nhập ---
-def login():
-    st.title("🔐 Đăng nhập Câu lạc bộ Pickleball Ban CĐSCN")
-    with st.form("login_form", clear_on_submit=False):
-        email = st.text_input("📧 Email")
-        password = st.text_input("🔑 Mật khẩu", type="password")
-        submitted = st.form_submit_button("Đăng nhập")
-        if submitted:
-            if email in st.session_state.users:
-                user = st.session_state.users[email]
-                if user['password_hash'] == hash_password(password):
-                    if user['approved']:
-                        st.session_state['login'] = True
-                        st.session_state['user_email'] = email
-                        st.session_state['user_role'] = user['role']
-                        st.success(f"Chào mừng {user['name']}!")
-                        st.rerun()
-                    else:
-                        st.error("⚠️ Tài khoản chưa được phê duyệt. Vui lòng chờ quản trị viên.")
-                else:
-                    st.error("❌ Mật khẩu không đúng.")
-            else:
-                st.error("❌ Email không tồn tại.")
-
-# --- Hàm đăng ký ---
-def register():
-    st.title("📝 Đăng ký thành viên mới")
-    with st.form("register_form"):
-        name = st.text_input("Họ và tên")
-        email = st.text_input("Email")
-        phone = st.text_input("Số điện thoại")
-        password = st.text_input("Mật khẩu", type="password")
-        password2 = st.text_input("Nhập lại mật khẩu", type="password")
-        submitted = st.form_submit_button("Đăng ký")
-        if submitted:
-            if not (name and email and phone and password and password2):
-                st.error("Vui lòng điền đầy đủ thông tin.")
-                return
-            if password != password2:
-                st.error("Mật khẩu nhập lại không khớp.")
-                return
-            if email in st.session_state.users or email in st.session_state.pending_users:
-                st.error("Email đã được đăng ký.")
-                return
-            new_user = {
-                'name': name,
-                'phone': phone,
-                'password_hash': hash_password(password),
-                'role': 'member',
-                'approved': False,
-                'wins': 0,
-                'balance': 0,
-                'votes': []
+def login_user(email, password):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT id, full_name, is_approved, is_admin FROM users 
+        WHERE email = ? AND password = ?
+    ''', (email, hash_password(password)))
+    
+    user = cursor.fetchone()
+    conn.close()
+    
+    if user:
+        if user[2] == 1 or user[3] == 1:  # approved or admin
+            return True, {
+                'id': user[0],
+                'name': user[1],
+                'is_admin': user[3] == 1
             }
-            st.session_state.pending_users[email] = new_user
-            st.session_state.users[email] = new_user
-            save_all()
-            st.success("Đăng ký thành công! Vui lòng chờ quản trị viên phê duyệt.")
-
-# --- Tab phê duyệt thành viên ---
-def admin_approve_users():
-    st.header("🛠️ Phê duyệt thành viên mới")
-    pending = st.session_state.pending_users
-    if not pending:
-        st.info("Không có thành viên chờ phê duyệt.")
-        return
-    for email, info in list(pending.items()):
-        with st.expander(f"{info['name']} - {email} - {info['phone']}"):
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(f"✅ Phê duyệt {email}", key=f"approve_{email}"):
-                    info['approved'] = True
-                    st.session_state.users[email] = info
-                    del st.session_state.pending_users[email]
-                    save_all()
-                    st.success(f"Đã phê duyệt {email}")
-                    st.rerun()
-            with col2:
-                if st.button(f"❌ Từ chối {email}", key=f"reject_{email}"):
-                    if email in st.session_state.users:
-                        del st.session_state.users[email]
-                    if email in st.session_state.pending_users:
-                        del st.session_state.pending_users[email]
-                    save_all()
-                    st.warning(f"Đã từ chối {email}")
-                    st.rerun()
-
-# --- Tab danh sách thành viên ---
-def tab_members():
-    st.header("👥 Danh sách thành viên")
-    users = st.session_state.users
-    members = [u for u in users.values() if u['role'] == 'member' and u['approved']]
-    if not members:
-        st.info("Chưa có thành viên nào được phê duyệt.")
-        return
-
-    attendance_count = {email: 0 for email in users if users[email]['role'] == 'member' and users[email]['approved']}
-    for vote in st.session_state.votes:
-        for voter in vote['voters']:
-            if voter in attendance_count:
-                attendance_count[voter] += 1
-
-    data = []
-    for u in members:
-        email = next((e for e, user in users.items() if user == u), None)
-        count = attendance_count.get(email, 0)
-        data.append({
-            'Tên': u['name'],
-            'Số điện thoại': u['phone'],
-            'Số lần tham gia luyện tập': count,
-            'Số tiền còn lại (VNĐ)': u['balance']
-        })
-
-    df = pd.DataFrame(data)
-    st.dataframe(df.style.format({"Số tiền còn lại (VNĐ)": "{:,.0f}"}))
-
-# --- Tab Ranking ---
-def tab_ranking():
-    st.header("🏆 Xếp hạng thành viên theo số trận thắng")
-    users = st.session_state.users
-    members = {email: u for email, u in users.items() if u['role'] == 'member' and u['approved']}
-    if not members:
-        st.info("Chưa có thành viên nào được phê duyệt.")
-        return
-
-    df = pd.DataFrame([
-        {'email': email, 'Tên': u['name'], 'Số trận thắng': u['wins']}
-        for email, u in members.items()
-    ])
-
-    def rank_label(wins):
-        if wins > 50:
-            return "Hạt giống 1"
-        elif wins > 30:
-            return "Hạt giống 2"
-        elif wins > 10:
-            return "Hạt giống 3"
         else:
-            return ""
+            return False, "Tài khoản chưa được phê duyệt!"
+    return False, "Email hoặc mật khẩu không đúng!"
 
-    df['Xếp loại'] = df['Số trận thắng'].apply(rank_label)
-    df = df.sort_values(by='Số trận thắng', ascending=False).reset_index(drop=True)
+# Database helper functions
+def get_pending_members():
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT id, full_name, email, phone, birth_date, created_at
+        FROM users 
+        WHERE is_approved = 0 AND is_admin = 0
+        ORDER BY created_at DESC
+    ''', conn)
+    conn.close()
+    return df
 
-    if st.session_state.user_role == 'admin':
-        st.subheader("Chỉnh sửa số trận thắng")
-        df_edit = df[['Tên', 'Số trận thắng']].copy().reset_index(drop=True)
-        try:
-            edited_df = st.data_editor(df_edit)  # Sử dụng st.data_editor ổn định
-        except Exception as e:
-            st.error(f"Lỗi hiển thị bảng chỉnh sửa: {e}")
-            st.write(df_edit)  # Fallback hiển thị tĩnh
+def get_approved_members():
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT id, full_name, phone, birth_date
+        FROM users 
+        WHERE is_approved = 1
+        ORDER BY full_name
+    ''', conn)
+    conn.close()
+    return df
 
-        if st.button("Lưu cập nhật"):
-            for idx, row in edited_df.iterrows():
-                name = row['Tên']
-                wins_new = int(row['Số trận thắng'])
-                email = next((e for e, u in members.items() if u['name'] == name), None)
-                if email:
-                    st.session_state.users[email]['wins'] = wins_new
-            save_all()
-            st.success("Đã cập nhật số trận thắng!")
-            st.rerun()
-    else:
-        st.dataframe(df[['Tên', 'Số trận thắng', 'Xếp loại']].style.bar(subset=['Số trận thắng'], color='#4CAF50'))
+def approve_member(user_id, admin_name):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        UPDATE users 
+        SET is_approved = 1, approved_at = CURRENT_TIMESTAMP, approved_by = ?
+        WHERE id = ?
+    ''', (admin_name, user_id))
+    
+    conn.commit()
+    conn.close()
 
-    st.subheader("Chi tiết trận thắng")
-    matches = st.session_state.matches
-    if not matches:
-        st.info("Chưa có trận thắng nào được nhập.")
-    else:
-        member_emails = list(members.keys())
-        member_email = st.selectbox("Chọn thành viên", options=member_emails)
-        member_name = users[member_email]['name']
-        member_matches = [m for m in matches if m['player_email'] == member_email]
-        if not member_matches:
-            st.info(f"{member_name} chưa có trận thắng nào được nhập.")
-        else:
-            df_match = pd.DataFrame(member_matches)
-            df_match_display = df_match.rename(columns={
-                'date': 'Ngày thắng',
-                'location': 'Địa điểm',
-                'score': 'Tỉ số',
-                'min_wins': 'Số trận thắng tối thiểu'
-            })
-            df_match_display = df_match_display[['Ngày thắng', 'Địa điểm', 'Tỉ số', 'Số trận thắng tối thiểu']]
-            st.dataframe(df_match_display)
+def reject_member(user_id):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    
+    conn.commit()
+    conn.close()
 
-    if st.session_state.user_role == 'admin':
-        st.subheader("Nhập trận thắng mới cho thành viên")
-        with st.form("input_wins"):
-            member_email = st.selectbox("Chọn thành viên", options=member_emails, key="input_wins_member")
-            min_wins = st.number_input("Số trận thắng tối thiểu", min_value=1, step=1)
-            date_str = st.date_input("Ngày trận thắng", value=datetime.today())
-            location = st.text_input("Địa điểm")
-            score = st.text_input("Tỉ số trận thắng (ví dụ 21:15)")
-            submitted = st.form_submit_button("Thêm trận thắng")
-            if submitted:
-                if not location or not score:
-                    st.error("Vui lòng nhập đầy đủ địa điểm và tỉ số trận thắng.")
-                else:
-                    st.session_state.users[member_email]['wins'] += min_wins
-                    st.session_state.matches.append({
-                        'player_email': member_email,
-                        'min_wins': min_wins,
-                        'date': date_str.strftime("%Y-%m-%d"),
-                        'location': location,
-                        'score': score
-                    })
-                    save_all()
-                    st.success("Đã thêm trận thắng thành công!")
-                    st.rerun()
+def get_rankings():
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT u.full_name, COUNT(r.id) as total_wins
+        FROM users u
+        LEFT JOIN rankings r ON u.id = r.user_id
+        WHERE u.is_approved = 1
+        GROUP BY u.id, u.full_name
+        ORDER BY total_wins DESC
+    ''', conn)
+    conn.close()
+    return df
 
-# --- Tab Vote ---
-def tab_vote():
-    st.header("🗳️ Bình chọn tham gia chơi")
+def add_ranking(user_name, wins, match_date, location, score):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    # Get user_id
+    cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1', (user_name,))
+    user = cursor.fetchone()
+    
+    if user:
+        # Add multiple ranking entries for wins
+        for _ in range(wins):
+            cursor.execute('''
+                INSERT INTO rankings (user_id, wins, match_date, location, score)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user[0], 1, match_date, location, score))
+    
+    conn.commit()
+    conn.close()
 
-    # Tạo bình chọn mới (admin)
-    if st.session_state.user_role == 'admin':
-        st.subheader("Tạo bình chọn mới")
-        with st.form("create_vote"):
-            date_vote = st.date_input("Chọn ngày tham gia", value=datetime.today())
-            weekday_vn = get_weekday_vn(date_vote)
-            description = st.text_area("Mô tả bình chọn (ví dụ: Buổi tập kỹ thuật, giao hữu...)")
-            submitted = st.form_submit_button("Tạo bình chọn")
-            if submitted:
-                date_str = date_vote.strftime("%Y-%m-%d")
-                if any(v['date'] == date_str for v in st.session_state.votes):
-                    st.warning("Đã có bình chọn cho ngày này.")
-                else:
-                    st.session_state.votes.append({
-                        'date': date_str,
-                        'weekday': weekday_vn,
-                        'description': description,
-                        'voters': []
-                    })
-                    add_vote_history("Tạo mới", f"Ngày {date_str}: {description}")
-                    save_all()
-                    st.success("Tạo bình chọn thành công!")
-                    st.rerun()
+def get_vote_sessions():
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT vs.id, vs.session_date, vs.description, 
+               COUNT(v.id) as vote_count
+        FROM vote_sessions vs
+        LEFT JOIN votes v ON vs.session_date = v.vote_date
+        GROUP BY vs.id, vs.session_date, vs.description
+        ORDER BY vs.session_date DESC
+    ''', conn)
+    conn.close()
+    return df
 
-        # Hiển thị lịch sử sửa bình chọn (admin)
-        st.subheader("📜 Lịch sử sửa bình chọn")
-        if st.session_state.vote_history:
-            df_history = pd.DataFrame(st.session_state.vote_history)
-            df_history = df_history.sort_values(by='timestamp', ascending=False)
-            st.dataframe(df_history)
-        else:
-            st.info("Chưa có lịch sử sửa bình chọn.")
+def create_vote_session(session_date, description):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT INTO vote_sessions (session_date, description)
+        VALUES (?, ?)
+    ''', (session_date, description))
+    
+    conn.commit()
+    conn.close()
 
-    # Bình chọn cho member
-    if st.session_state.user_role == 'member':
-        if not st.session_state.votes:
-            st.info("Chưa có bình chọn nào.")
-            return
-        st.subheader("Bình chọn tham gia")
-        for vote in st.session_state.votes:
-            date_str = vote['date']
-            voted = st.session_state.user_email in vote['voters']
-            desc = vote.get('description', '')
-            weekday = vote.get('weekday', '')
-            with st.expander(f"{weekday} - {date_str} - {desc}"):
-                if voted:
-                    st.markdown(f"- ✅ Bạn đã tham gia bình chọn ngày **{date_str}**")
-                else:
-                    if st.button(f"Tham gia ngày {date_str}", key=date_str):
-                        vote['voters'].append(st.session_state.user_email)
-                        save_all()
-                        st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
-                        st.rerun()
+def vote_for_session(user_id, session_date):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    # Check if already voted
+    cursor.execute('''
+        SELECT id FROM votes WHERE user_id = ? AND vote_date = ?
+    ''', (user_id, session_date))
+    
+    if not cursor.fetchone():
+        cursor.execute('''
+            INSERT INTO votes (user_id, vote_date)
+            VALUES (?, ?)
+        ''', (user_id, session_date))
+        conn.commit()
+        conn.close()
+        return True
+    
+    conn.close()
+    return False
 
-    # Thống kê số lượng vote tham gia (bỏ cột 'Thứ')
-    st.subheader("Thống kê số lượng vote tham gia")
-    if not st.session_state.votes:
-        st.info("Chưa có bình chọn nào.")
-        return
-    data = [{'Ngày': v['date'], 'Mô tả': v.get('description', ''), 'Số lượng tham gia': len(v['voters'])} for v in st.session_state.votes]
-    df = pd.DataFrame(data).sort_values(by='Ngày', ascending=False)
-    st.dataframe(df.style.bar(subset=['Số lượng tham gia'], color='#2196F3'))
+def get_vote_details(session_date):
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT u.full_name, v.created_at
+        FROM votes v
+        JOIN users u ON v.user_id = u.id
+        WHERE v.vote_date = ?
+        ORDER BY v.created_at
+    ''', conn, params=(session_date,))
+    conn.close()
+    return df
 
-# --- Tab Home ---
-@st.cache_data  # Cache dữ liệu tĩnh để tối ưu hiệu suất trên cloud
-def tab_home():
-    st.header("📊 Trang chủ - Thống kê tổng quan")
+def add_contribution(user_name, amount):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1', (user_name,))
+    user = cursor.fetchone()
+    
+    if user:
+        cursor.execute('''
+            INSERT INTO finances (user_id, amount, transaction_type, description)
+            VALUES (?, ?, ?, ?)
+        ''', (user[0], amount, 'contribution', 'Đóng quỹ'))
+    
+    conn.commit()
+    conn.close()
 
-    users = st.session_state.users
-    members = [u for u in users.values() if u['role'] == 'member' and u['approved']]
-    if not members:
-        st.info("Chưa có thành viên nào được phê duyệt.")
-        return
+def add_expense(session_date, court_fee, water_fee, other_fee, description):
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    total_fee = court_fee + water_fee + other_fee
+    
+    # Get voters for this session
+    cursor.execute('''
+        SELECT user_id FROM votes WHERE vote_date = ?
+    ''', (session_date,))
+    voters = cursor.fetchall()
+    
+    if voters:
+        cost_per_person = total_fee // len(voters)
+        
+        for voter in voters:
+            cursor.execute('''
+                INSERT INTO finances (user_id, amount, transaction_type, description, session_date, court_fee, water_fee, other_fee)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (voter[0], -cost_per_person, 'expense', description, session_date, 
+                  court_fee//len(voters), water_fee//len(voters), other_fee//len(voters)))
+    
+    conn.commit()
+    conn.close()
 
-    df = pd.DataFrame(members)
+def get_financial_summary():
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT u.full_name,
+               COALESCE(SUM(CASE WHEN f.transaction_type = 'contribution' THEN f.amount ELSE 0 END), 0) as total_contribution,
+               COUNT(CASE WHEN f.transaction_type = 'expense' THEN 1 END) as sessions_attended,
+               COALESCE(SUM(CASE WHEN f.transaction_type = 'expense' THEN f.amount ELSE 0 END), 0) as total_expenses,
+               COALESCE(SUM(f.amount), 0) as balance
+        FROM users u
+        LEFT JOIN finances f ON u.id = f.user_id
+        WHERE u.is_approved = 1
+        GROUP BY u.id, u.full_name
+        ORDER BY balance DESC
+    ''', conn)
+    conn.close()
+    return df
 
-    col1, col2, col3 = st.columns(3)
+def get_alerts():
+    alerts = []
+    
+    # Check low balance alert
+    conn = sqlite3.connect('pickleball_club.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT u.full_name, COALESCE(SUM(f.amount), 0) as balance
+        FROM users u
+        LEFT JOIN finances f ON u.id = f.user_id
+        WHERE u.is_approved = 1
+        GROUP BY u.id, u.full_name
+        HAVING balance < 100000
+    ''')
+    
+    low_balance_users = cursor.fetchall()
+    for user in low_balance_users:
+        alerts.append(f"⚠️ {user[0]} có số dư thấp: {user[1]:,} VNĐ")
+    
+    # Check low voting activity
+    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    cursor.execute('''
+        SELECT u.full_name, COUNT(v.id) as vote_count
+        FROM users u
+        LEFT JOIN votes v ON u.id = v.user_id AND v.created_at >= ?
+        WHERE u.is_approved = 1
+        GROUP BY u.id, u.full_name
+        HAVING vote_count < 3
+    ''', (thirty_days_ago,))
+    
+    low_activity_users = cursor.fetchall()
+    for user in low_activity_users:
+        alerts.append(f"📊 {user[0]} vote ít trong 30 ngày qua: {user[1]} lần")
+    
+    conn.close()
+    return alerts
 
-    with col1:
-        st.subheader("🏅 Top thành viên theo số trận thắng")
-        df_rank = df[['name', 'wins']].sort_values(by='wins', ascending=False).head(10)
-        st.bar_chart(df_rank.set_index('name'))
+# Initialize database
+init_database()
 
-    with col2:
-        st.subheader("💵 Top thành viên theo số tiền còn lại")
-        df_balance = df[['name', 'balance']].sort_values(by='balance', ascending=False).head(10)
-        st.bar_chart(df_balance.set_index('name'))
+# Initialize session state
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'user' not in st.session_state:
+    st.session_state.user = None
 
-    with col3:
-        st.subheader("🗳️ Số lần tham gia chơi")
-        vote_counts = {email: 0 for email in users}
-        for vote in st.session_state.votes:
-            for v in vote['voters']:
-                vote_counts[v] = vote_counts.get(v, 0) + 1
-        data = []
-        for email, count in vote_counts.items():
-            user = users.get(email)
-            if user and user['role'] == 'member' and user['approved']:
-                data.append({'name': user['name'], 'votes': count})
-        df_vote = pd.DataFrame(data)
-        if not df_vote.empty:
-            df_vote = df_vote.sort_values(by='votes', ascending=False).head(10)
-            st.bar_chart(df_vote.set_index('name'))
-        else:
-            st.info("Chưa có dữ liệu bình chọn tham gia.")
-# --- Tab quản lý tài chính ---
-def tab_finance():
-    st.header("💰 Quản lý tài chính")
-    users = st.session_state.users
-    members = [email for email, u in users.items() if u['role'] == 'member' and u['approved']]
-
-    st.subheader("Nhập số tiền đóng góp của thành viên")
-    with st.form("input_contribution"):
-        member_email = st.selectbox("Chọn thành viên", options=members)
-        amount = st.number_input("Số tiền đóng góp (VNĐ)", min_value=0, step=1000)
-        submitted = st.form_submit_button("Cập nhật đóng góp")
-        if submitted:
-            users[member_email]['balance'] += amount
-            # Lưu tổng đóng góp
-            if 'total_contributed' not in users[member_email]:
-                users[member_email]['total_contributed'] = 0
-            users[member_email]['total_contributed'] += amount
-            save_all()
-            st.success("Cập nhật đóng góp thành công!")
-            st.rerun()
-
-    if st.session_state.user_role == 'admin':
-        st.subheader("Nhập chi phí buổi tập")
-        with st.form("input_expense"):
-            if not st.session_state.votes:
-                st.info("Chưa có bình chọn nào để xác định người tham gia.")
-            else:
-                vote_dates = [v['date'] for v in st.session_state.votes]
-                date_expense = st.selectbox("Chọn ngày buổi tập", options=vote_dates)
-                cost = st.number_input("Chi phí buổi tập (VNĐ)", min_value=0, step=1000)
-                submitted = st.form_submit_button("Nhập chi phí")
-                if submitted:
-                    vote = next((v for v in st.session_state.votes if v['date'] == date_expense), None)
-                    if vote is None or len(vote['voters']) == 0:
-                        st.error("Ngày này không có thành viên tham gia.")
-                    else:
-                        per_person = cost / len(vote['voters'])
-                        for email in vote['voters']:
-                            users[email]['balance'] -= per_person
-                            # Lưu tổng chi phí buổi tập cho thành viên (tổng của per_person cho các buổi họ tham gia)
-                            if 'total_session_cost' not in users[email]:
-                                users[email]['total_session_cost'] = 0
-                            users[email]['total_session_cost'] += per_person
-                        st.session_state.expenses.append({'date': date_expense, 'amount': cost, 'participants': vote['voters']})
-                        save_all()
-                        st.success(f"Đã nhập chi phí và trừ tiền cho {len(vote['voters'])} thành viên.")
-                        st.rerun()
-    else:
-        st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
-
-    st.subheader("Số dư tài chính các thành viên")
-    # Tính tổng chi phí tất cả buổi tập (từ tất cả các lần vote)
-    total_all_expenses = sum(expense.get('amount', 0) for expense in st.session_state.expenses)
-    st.write(f"**Tổng chi phí tất cả buổi tập: {total_all_expenses:,.0f} VNĐ**")
-
-    # Tính số buổi tham gia luyện tập
-    attendance_count = {email: 0 for email in members}
-    for vote in st.session_state.votes:
-        for voter in vote['voters']:
-            if voter in attendance_count:
-                attendance_count[voter] += 1
-
-    data = []
-    for email in members:
-        name = users[email]['name']
-        balance = users[email]['balance']
-        # Số tiền đã đóng góp (từ trường 'total_contributed' nếu có, ngược lại dùng balance dương)
-        total_contributed = users[email].get('total_contributed', max(balance, 0))
-        # Số buổi tham gia luyện tập
-        sessions = attendance_count.get(email, 0)
-        # Chi phí cho buổi tập (tổng chi phí mà thành viên đã trả cho tất cả buổi họ tham gia)
-        session_cost = users[email].get('total_session_cost', 0)
-        data.append({
-            'Tên': name,
-            'Số tiền đã đóng góp (VNĐ)': total_contributed,
-            'Số buổi tham gia luyện tập': sessions,
-            'Chi phí cho buổi tập (VNĐ)': session_cost,
-            'Số tiền còn lại (VNĐ)': balance
-        })
-
-    df = pd.DataFrame(data)
-    st.dataframe(
-        df.style.format({
-            "Số tiền đã đóng góp (VNĐ)": "{:,.0f}",
-            "Chi phí cho buổi tập (VNĐ)": "{:,.0f}",
-            "Số tiền còn lại (VNĐ)": "{:,.0f}"
-        }).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800')
-    )
-# --- Hàm load dữ liệu mẫu ---
-def load_sample_data():
-    # Dữ liệu mẫu thành viên
-    sample_users = {
-        "member1@example.com": {
-            "name": "Nguyễn Văn A",
-            "phone": "0123456789",
-            "password_hash": hash_password("password1"),
-            "role": "member",
-            "approved": True,
-            "wins": 15,
-            "balance": 50000,
-            "total_contributed": 100000,
-            "total_session_cost": 30000
-        },
-        "member2@example.com": {
-            "name": "Trần Thị B",
-            "phone": "0987654321",
-            "password_hash": hash_password("password2"),
-            "role": "member",
-            "approved": True,
-            "wins": 20,
-            "balance": 30000,
-            "total_contributed": 80000,
-            "total_session_cost": 25000
-        },
-        "member3@example.com": {
-            "name": "Lê Văn C",
-            "phone": "0111111111",
-            "password_hash": hash_password("password3"),
-            "role": "member",
-            "approved": True,
-            "wins": 10,
-            "balance": 70000,
-            "total_contributed": 120000,
-            "total_session_cost": 20000
-        },
-        "member4@example.com": {
-            "name": "Phạm Thị D",
-            "phone": "0222222222",
-            "password_hash": hash_password("password4"),
-            "role": "member",
-            "approved": True,
-            "wins": 25,
-            "balance": 20000,
-            "total_contributed": 90000,
-            "total_session_cost": 35000
-        },
-        "member5@example.com": {
-            "name": "Hoàng Văn E",
-            "phone": "0333333333",
-            "password_hash": hash_password("password5"),
-            "role": "member",
-            "approved": True,
-            "wins": 5,
-            "balance": 60000,
-            "total_contributed": 70000,
-            "total_session_cost": 15000
-        }
-    }
-    st.session_state.users.update(sample_users)
-
-    # Dữ liệu mẫu votes (bình chọn)
-    sample_votes = [
-        {
-            "date": "2023-10-01",
-            "weekday": "Thứ Hai",
-            "description": "Buổi tập kỹ thuật",
-            "voters": ["member1@example.com", "member2@example.com", "member3@example.com"]
-        },
-        {
-            "date": "2023-10-08",
-            "weekday": "Thứ Hai",
-            "description": "Buổi giao hữu",
-            "voters": ["member1@example.com", "member4@example.com", "member5@example.com"]
-        },
-        {
-            "date": "2023-10-15",
-            "weekday": "Thứ Hai",
-            "description": "Buổi tập nâng cao",
-            "voters": ["member2@example.com", "member3@example.com", "member4@example.com"]
-        }
-    ]
-    st.session_state.votes.extend(sample_votes)
-
-    # Dữ liệu mẫu expenses (chi phí buổi tập)
-    sample_expenses = [
-        {
-            "date": "2023-10-01",
-            "amount": 30000,
-            "participants": ["member1@example.com", "member2@example.com", "member3@example.com"]
-        },
-        {
-            "date": "2023-10-08",
-            "amount": 25000,
-            "participants": ["member1@example.com", "member4@example.com", "member5@example.com"]
-        },
-        {
-            "date": "2023-10-15",
-            "amount": 40000,
-            "participants": ["member2@example.com", "member3@example.com", "member4@example.com"]
-        }
-    ]
-    st.session_state.expenses.extend(sample_expenses)
-
-    # Dữ liệu mẫu matches (chi tiết trận thắng cho ranking)
-    sample_matches = [
-        {
-            "player_email": "member1@example.com",
-            "date": "2023-10-02",
-            "location": "Sân A",
-            "score": "21:15",
-            "min_wins": 3
-        },
-        {
-            "player_email": "member2@example.com",
-            "date": "2023-10-03",
-            "location": "Sân B",
-            "score": "21:18",
-            "min_wins": 4
-        },
-        {
-            "player_email": "member4@example.com",
-            "date": "2023-10-04",
-            "location": "Sân C",
-            "score": "21:12",
-            "min_wins": 5
-        }
-    ]
-    st.session_state.matches.extend(sample_matches)
-
-    save_all()
-    st.success("Đã load dữ liệu mẫu thành công!")
-
-# --- Cập nhật main() để load dữ liệu mẫu nếu chưa có ---
+# Main app
 def main():
-    st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
-
-    # Load dữ liệu mẫu nếu chưa có thành viên
-    if not any(u['role'] == 'member' for u in st.session_state.users.values()):
-        load_sample_data()
-
-    st.sidebar.title("🏓 Menu")
-    if 'login' not in st.session_state or not st.session_state.login:
-        choice = st.sidebar.radio("Chọn chức năng", ["Đăng nhập", "Đăng ký"])
-        if choice == "Đăng nhập":
-            login()
-        else:
-            register()
+    # Header
+    st.markdown("""
+        <div class="main-header">
+            <h1>🏓 DTT PICKLEBALL CLUB</h1>
+            <p>Hệ thống quản lý câu lạc bộ Pickleball chuyên nghiệp</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # Authentication
+    if not st.session_state.logged_in:
+        show_auth_page()
     else:
-        user = st.session_state.users[st.session_state.user_email]
-        st.sidebar.markdown(f"**Xin chào, {user['name']}** ({st.session_state.user_role})")
-        if st.sidebar.button("🚪 Đăng xuất"):
-            st.session_state.login = False
+        show_main_app()
+
+def show_auth_page():
+    tab1, tab2 = st.tabs(["🔐 Đăng nhập", "📝 Đăng ký"])
+    
+    with tab1:
+        st.subheader("Đăng nhập vào hệ thống")
+        
+        with st.form("login_form"):
+            email = st.text_input("📧 Email", placeholder="Nhập địa chỉ email")
+            password = st.text_input("🔒 Mật khẩu", type="password", placeholder="Nhập mật khẩu")
+            
+            if st.form_submit_button("Đăng nhập", use_container_width=True):
+                if email and password:
+                    success, result = login_user(email, password)
+                    if success:
+                        st.session_state.logged_in = True
+                        st.session_state.user = result
+                        st.rerun()
+                    else:
+                        st.error(result)
+                else:
+                    st.error("Vui lòng nhập đầy đủ thông tin!")
+        
+        st.info("💡 Tài khoản admin mặc định: admin@local / Admin@123")
+    
+    with tab2:
+        st.subheader("Đăng ký thành viên mới")
+        
+        with st.form("register_form"):
+            full_name = st.text_input("👤 Họ và tên", placeholder="Nhập họ và tên đầy đủ")
+            email = st.text_input("📧 Email", placeholder="Nhập địa chỉ email")
+            phone = st.text_input("📱 Số điện thoại", placeholder="Nhập số điện thoại")
+            birth_date = st.date_input("📅 Ngày sinh", min_value=datetime(1950, 1, 1), max_value=datetime(2010, 12, 31))
+            password = st.text_input("🔒 Mật khẩu", type="password", placeholder="Nhập mật khẩu")
+            confirm_password = st.text_input("🔒 Xác nhận mật khẩu", type="password", placeholder="Nhập lại mật khẩu")
+            
+            if st.form_submit_button("Đăng ký", use_container_width=True):
+                if all([full_name, email, phone, birth_date, password, confirm_password]):
+                    if password == confirm_password:
+                        success, message = register_user(full_name, email, phone, birth_date, password)
+                        if success:
+                            st.success(message)
+                        else:
+                            st.error(message)
+                    else:
+                        st.error("Mật khẩu xác nhận không khớp!")
+                else:
+                    st.error("Vui lòng nhập đầy đủ thông tin!")
+
+def show_main_app():
+    # Sidebar navigation
+    with st.sidebar:
+        st.markdown(f"### Chào mừng, {st.session_state.user['name']}! 👋")
+        st.markdown("---")
+        
+        pages = ["🏠 Trang chủ", "👥 Danh sách thành viên", "🏆 Xếp hạng", "🗳️ Bình chọn", "💰 Tài chính", "⚠️ Cảnh báo"]
+        
+        if st.session_state.user['is_admin']:
+            pages.insert(1, "✅ Phê duyệt thành viên")
+        
+        selected_page = st.selectbox("📍 Chọn trang", pages)
+        
+        st.markdown("---")
+        if st.button("🚪 Đăng xuất", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.user = None
             st.rerun()
+    
+    # Main content
+    if selected_page == "🏠 Trang chủ":
+        show_home_page()
+    elif selected_page == "✅ Phê duyệt thành viên":
+        show_approval_page()
+    elif selected_page == "👥 Danh sách thành viên":
+        show_members_page()
+    elif selected_page == "🏆 Xếp hạng":
+        show_ranking_page()
+    elif selected_page == "🗳️ Bình chọn":
+        show_voting_page()
+    elif selected_page == "💰 Tài chính":
+        show_finance_page()
+    elif selected_page == "⚠️ Cảnh báo":
+        show_alerts_page()
 
-        tabs = ["Home", "Thành viên", "Ranking", "Vote", "Quản lý tài chính"]
-        if st.session_state.user_role == 'admin':
-            tabs.insert(1, "Phê duyệt thành viên")
+def show_home_page():
+    st.title("📊 Trang chủ - Tổng quan")
+    
+    # Statistics
+    members_df = get_approved_members()
+    rankings_df = get_rankings()
+    financial_df = get_financial_summary()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown(f"""
+            <div class="stat-card">
+                <div class="stat-number">{len(members_df)}</div>
+                <div class="stat-label">👥 Tổng số thành viên</div>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        top_winner = rankings_df.iloc[0] if not rankings_df.empty else None
+        st.markdown(f"""
+            <div class="stat-card">
+                <div class="stat-number">{top_winner['total_wins'] if top_winner is not None else 0}</div>
+                <div class="stat-label">🏆 Nhiều trận thắng nhất</div>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        total_balance = financial_df['balance'].sum() if not financial_df.empty else 0
+        st.markdown(f"""
+            <div class="stat-card">
+                <div class="stat-number">{total_balance:,}</div>
+                <div class="stat-label">💰 Tổng quỹ (VNĐ)</div>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    # Charts
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🏆 Top thành viên có nhiều trận thắng")
+        if not rankings_df.empty:
+            top_5 = rankings_df.head(5)
+            fig = px.bar(top_5, x='total_wins', y='full_name', orientation='h',
+                        title="Top 5 thành viên xuất sắc",
+                        color='total_wins',
+                        color_continuous_scale='Blues')
+            fig.update_layout(height=400, showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Chưa có dữ liệu ranking")
+    
+    with col2:
+        st.subheader("💰 Tình hình tài chính")
+        if not financial_df.empty:
+            fig = px.pie(financial_df, values='total_contribution', names='full_name',
+                        title="Tỷ lệ đóng góp của thành viên")
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Chưa có dữ liệu tài chính")
+    
+    # Recent activities
+    st.subheader("📈 Hoạt động gần đây")
+    
+    conn = sqlite3.connect('pickleball_club.db')
+    recent_activities = pd.read_sql_query('''
+        SELECT 'Thành viên mới' as activity_type, u.full_name as details, u.approved_at as activity_date
+        FROM users u WHERE u.is_approved = 1 AND u.approved_at IS NOT NULL
+        UNION ALL
+        SELECT 'Vote tham gia' as activity_type, u.full_name as details, v.created_at as activity_date
+        FROM votes v JOIN users u ON v.user_id = u.id
+        UNION ALL
+        SELECT 'Đóng quỹ' as activity_type, u.full_name || ' - ' || f.amount || ' VNĐ' as details, f.created_at as activity_date
+        FROM finances f JOIN users u ON f.user_id = u.id WHERE f.transaction_type = 'contribution'
+        ORDER BY activity_date DESC
+        LIMIT 10
+    ''', conn)
+    conn.close()
+    
+    if not recent_activities.empty:
+        for _, activity in recent_activities.iterrows():
+            activity_date = pd.to_datetime(activity['activity_date']).strftime('%d/%m/%Y %H:%M')
+            st.markdown(f"""
+                <div class="member-card">
+                    <strong>{activity['activity_type']}</strong>: {activity['details']}
+                    <br><small>📅 {activity_date}</small>
+                </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("Chưa có hoạt động gần đây")
 
-        choice = st.sidebar.radio("Chọn chức năng", tabs)
+def show_approval_page():
+    if not st.session_state.user['is_admin']:
+        st.error("Chỉ admin mới có quyền truy cập trang này!")
+        return
+    
+    st.title("✅ Phê duyệt thành viên")
+    
+    pending_members = get_pending_members()
+    
+    if pending_members.empty:
+        st.success("🎉 Không có thành viên nào cần phê duyệt!")
+    else:
+        st.subheader(f"📋 Có {len(pending_members)} thành viên chờ phê duyệt")
+        
+        for _, member in pending_members.iterrows():
+            with st.container():
+                col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                
+                with col1:
+                    st.markdown(f"""
+                        <div class="member-card">
+                            <strong>👤 {member['full_name']}</strong><br>
+                            📧 {member['email']}<br>
+                            📱 {member['phone']}<br>
+                            📅 {pd.to_datetime(member['birth_date']).strftime('%d/%m/%Y')}
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    register_date = pd.to_datetime(member['created_at']).strftime('%d/%m/%Y %H:%M')
+                    st.info(f"📅 Đăng ký: {register_date}")
+                
+                with col3:
+                    if st.button("✅ Phê duyệt", key=f"approve_{member['id']}", use_container_width=True):
+                        approve_member(member['id'], st.session_state.user['name'])
+                        st.success(f"Đã phê duyệt {member['full_name']}")
+                        st.rerun()
+                
+                with col4:
+                    if st.button("❌ Từ chối", key=f"reject_{member['id']}", use_container_width=True):
+                        reject_member(member['id'])
+                        st.warning(f"Đã từ chối {member['full_name']}")
+                        st.rerun()
+                
+                st.markdown("---")
 
-        try:
-            if choice == "Home":
-                tab_home()
-            elif choice == "Phê duyệt thành viên":
-                admin_approve_users()
-            elif choice == "Thành viên":
-                tab_members()
-            elif choice == "Ranking":
-                tab_ranking()
-            elif choice == "Vote":
-                tab_vote()
-            elif choice == "Quản lý tài chính":
-                tab_finance()
-        except Exception as e:
-            st.error(f"Lỗi khi tải tab {choice}: {e}")
+def show_members_page():
+    st.title("👥 Danh sách thành viên")
+    
+    members_df = get_approved_members()
+    
+    if members_df.empty:
+        st.info("Chưa có thành viên nào được phê duyệt")
+    else:
+        st.subheader(f"📊 Tổng số: {len(members_df)} thành viên")
+        
+        # Add search functionality
+        search_term = st.text_input("🔍 Tìm kiếm thành viên", placeholder="Nhập tên để tìm kiếm...")
+        
+        if search_term:
+            members_df = members_df[members_df['full_name'].str.contains(search_term, case=False, na=False)]
+        
+        # Display members in cards
+        members_df['birth_date'] = pd.to_datetime(members_df['birth_date']).dt.strftime('%d/%m/%Y')
+        members_df.index = range(1, len(members_df) + 1)
+        
+        st.dataframe(
+            members_df.rename(columns={
+                'full_name': 'Họ và tên',
+                'phone': 'Số điện thoại',
+                'birth_date': 'Ngày sinh'
+            })[['Họ và tên', 'Số điện thoại', 'Ngày sinh']],
+            use_container_width=True
+        )
+
+def show_ranking_page():
+    st.title("🏆 Xếp hạng thành viên")
+    
+    rankings_df = get_rankings()
+    
+    # Admin functions
+    if st.session_state.user['is_admin']:
+        with st.expander("➕ Thêm kết quả trận đấu"):
+            with st.form("add_ranking_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    members = get_approved_members()['full_name'].tolist()
+                    selected_member = st.selectbox("👤 Chọn thành viên", members)
+                    wins = st.number_input("🏆 Số trận thắng", min_value=1, max_value=10, value=1)
+                    match_date = st.date_input("📅 Ngày thi đấu", value=datetime.now().date())
+                
+                with col2:
+                    location = st.text_input("📍 Địa điểm", placeholder="VD: Sân ABC")
+                    score = st.text_input("📊 Tỷ số", placeholder="VD: 11-8, 11-6")
+                
+                if st.form_submit_button("💾 Lưu kết quả", use_container_width=True):
+                    if selected_member and location and score:
+                        add_ranking(selected_member, wins, match_date, location, score)
+                        st.success(f"Đã thêm {wins} trận thắng cho {selected_member}")
+                        st.rerun()
+                    else:
+                        st.error("Vui lòng nhập đầy đủ thông tin!")
+    
+    # Display rankings
+    if rankings_df.empty:
+        st.info("Chưa có dữ liệu xếp hạng")
+    else:
+        st.subheader("📈 Bảng xếp hạng")
+        
+        # Create ranking cards
+        for idx, (_, player) in enumerate(rankings_df.iterrows(), 1):
+            medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else "🏅"
+            
+            st.markdown(f"""
+                <div class="ranking-card">
+                    <h3>{medal} #{idx} - {player['full_name']}</h3>
+                    <h2>🏆 {player['total_wins']} trận thắng</h2>
+                </div>
+            """, unsafe_allow_html=True)
+        
+        # Chart
+        if len(rankings_df) > 1:
+            fig = px.bar(rankings_df.head(10), x='full_name', y='total_wins',
+                        title="Top 10 thành viên xuất sắc",
+                        color='total_wins',
+                        color_continuous_scale='Viridis')
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+
+def show_voting_page():
+    st.title("🗳️ Bình chọn tham gia")
+    
+    # Admin create vote session
+    if st.session_state.user['is_admin']:
+        with st.expander("➕ Tạo phiên bình chọn mới"):
+            with st.form("create_vote_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    session_date = st.date_input("📅 Ngày chơi", min_value=datetime.now().date())
+                
+                with col2:
+                    description = st.text_input("📝 Mô tả", placeholder="VD: Giao lưu cuối tuần")
+                
+                if st.form_submit_button("🗳️ Tạo phiên bình chọn", use_container_width=True):
+                    if description:
+                        create_vote_session(session_date, description)
+                        st.success("Đã tạo phiên bình chọn mới!")
+                        st.rerun()
+                    else:
+                        st.error("Vui lòng nhập mô tả!")
+    
+    # Display vote sessions
+    vote_sessions = get_vote_sessions()
+    
+    if vote_sessions.empty:
+        st.info("Chưa có phiên bình chọn nào")
+    else:
+        st.subheader("📋 Các phiên bình chọn")
+        
+        for _, session in vote_sessions.iterrows():
+            session_date_formatted = pd.to_datetime(session['session_date']).strftime('%d/%m/%Y')
+            
+            with st.container():
+                col1, col2, col3 = st.columns([3, 1, 1])
+                
+                with col1:
+                    st.markdown(f"""
+                        <div class="vote-card">
+                            <h4>📅 {session_date_formatted}</h4>
+                            <p>📝 {session['description']}</p>
+                            <p>👥 <strong>{session['vote_count']}</strong> người tham gia</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                
+                with col2:
+                    if st.button("🗳️ Vote", key=f"vote_{session['id']}", use_container_width=True):
+                        success = vote_for_session(st.session_state.user['id'], session['session_date'])
+                        if success:
+                            st.success("Đã vote thành công!")
+                            st.rerun()
+                        else:
+                            st.warning("Bạn đã vote cho phiên này!")
+                
+                with col3:
+                    if st.button("👁️ Chi tiết", key=f"detail_{session['id']}", use_container_width=True):
+                        vote_details = get_vote_details(session['session_date'])
+                        st.subheader(f"Chi tiết phiên {session_date_formatted}")
+                        
+                        if not vote_details.empty:
+                            for _, voter in vote_details.iterrows():
+                                vote_time = pd.to_datetime(voter['created_at']).strftime('%d/%m/%Y %H:%M')
+                                st.markdown(f"""
+                                    <div class="member-card">
+                                        👤 <strong>{voter['full_name']}</strong><br>
+                                        🕒 {vote_time}
+                                    </div>
+                                """, unsafe_allow_html=True)
+                        else:
+                            st.info("Chưa có ai vote cho phiên này")
+
+def show_finance_page():
+    st.title("💰 Quản lý tài chính")
+    
+    # Admin functions
+    if st.session_state.user['is_admin']:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            with st.expander("➕ Thêm đóng góp"):
+                with st.form("add_contribution_form"):
+                    members = get_approved_members()['full_name'].tolist()
+                    member_name = st.selectbox("👤 Thành viên", members)
+                    amount = st.number_input("💵 Số tiền (VNĐ)", min_value=10000, step=10000)
+                    
+                    if st.form_submit_button("💾 Lưu", use_container_width=True):
+                        add_contribution(member_name, amount)
+                        st.success(f"Đã thêm {amount:,} VNĐ cho {member_name}")
+                        st.rerun()
+        
+        with col2:
+            with st.expander("➕ Thêm chi phí"):
+                with st.form("add_expense_form"):
+                    expense_date = st.date_input("📅 Ngày chi")
+                    court_fee = st.number_input("🏸 Tiền sân (VNĐ)", min_value=0, step=10000)
+                    water_fee = st.number_input("💧 Tiền nước (VNĐ)", min_value=0, step=5000)
+                    other_fee = st.number_input("➕ Chi phí khác (VNĐ)", min_value=0, step=5000)
+                    description = st.text_input("📝 Ghi chú", placeholder="Mô tả chi phí")
+                    
+                    total = court_fee + water_fee + other_fee
+                    if total > 0:
+                        st.info(f"💰 Tổng chi phí: {total:,} VNĐ")
+                    
+                    if st.form_submit_button("💾 Lưu", use_container_width=True):
+                        if total > 0:
+                            add_expense(expense_date, court_fee, water_fee, other_fee, description)
+                            st.success(f"Đã thêm chi phí {total:,} VNĐ")
+                            st.rerun()
+                        else:
+                            st.error("Tổng chi phí phải lớn hơn 0!")
+    
+    # Financial summary
+    financial_df = get_financial_summary()
+    
+    if financial_df.empty:
+        st.info("Chưa có dữ liệu tài chính")
+    else:
+        st.subheader("📊 Tổng quan tài chính")
+        
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            total_contributions = financial_df['total_contribution'].sum()
+            st.metric("💰 Tổng đóng góp", f"{total_contributions:,} VNĐ")
+        
+        with col2:
+            total_expenses = abs(financial_df['total_expenses'].sum())
+            st.metric("💸 Tổng chi phí", f"{total_expenses:,} VNĐ")
+        
+        with col3:
+            total_balance = financial_df['balance'].sum()
+            st.metric("🏦 Số dư quỹ", f"{total_balance:,} VNĐ")
+        
+        with col4:
+            avg_sessions = financial_df['sessions_attended'].mean()
+            st.metric("📊 TB buổi tập", f"{avg_sessions:.1f}")
+        
+        # Detailed table
+        st.subheader("📋 Chi tiết tài chính thành viên")
+        
+        display_df = financial_df.copy()
+        display_df['total_contribution'] = display_df['total_contribution'].apply(lambda x: f"{x:,} VNĐ")
+        display_df['total_expenses'] = display_df['total_expenses'].apply(lambda x: f"{abs(x):,} VNĐ")
+        display_df['balance'] = display_df['balance'].apply(lambda x: f"{x:,} VNĐ")
+        display_df.index = range(1, len(display_df) + 1)
+        
+        st.dataframe(
+            display_df.rename(columns={
+                'full_name': 'Tên thành viên',
+                'total_contribution': 'Đã đóng',
+                'sessions_attended': 'Số buổi',
+                'total_expenses': 'Chi phí',
+                'balance': 'Số dư'
+            }),
+            use_container_width=True
+        )
+        
+        # Charts
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig = px.bar(financial_df, x='full_name', y='balance',
+                        title="Số dư của từng thành viên",
+                        color='balance',
+                        color_continuous_scale='RdYlBu')
+            fig.update_xaxis(tickangle=45)
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col2:
+            fig = px.scatter(financial_df, x='sessions_attended', y='total_contribution',
+                           size='total_contribution', hover_name='full_name',
+                           title="Mối quan hệ đóng góp vs tham gia")
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+def show_alerts_page():
+    st.title("⚠️ Cảnh báo hệ thống")
+    
+    alerts = get_alerts()
+    
+    if not alerts:
+        st.success("🎉 Không có cảnh báo nào!")
+        st.balloons()
+    else:
+        st.subheader(f"🚨 Có {len(alerts)} cảnh báo cần chú ý")
+        
+        for alert in alerts:
+            if "số dư thấp" in alert:
+                st.markdown(f"""
+                    <div class="danger-card">
+                        {alert}
+                    </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                    <div class="alert-card">
+                        {alert}
+                    </div>
+                """, unsafe_allow_html=True)
+    
+    # System statistics
+    st.subheader("📊 Thống kê hệ thống")
+    
+    conn = sqlite3.connect('pickleball_club.db')
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM users WHERE is_approved = 0')
+        pending_count = cursor.fetchone()[0]
+        st.metric("⏳ Chờ phê duyệt", pending_count)
+    
+    with col2:
+        cursor.execute('SELECT COUNT(*) FROM users WHERE is_approved = 1')
+        approved_count = cursor.fetchone()[0]
+        st.metric("✅ Thành viên active", approved_count)
+    
+    with col3:
+        cursor.execute('''
+            SELECT COUNT(*) FROM votes 
+            WHERE created_at >= datetime('now', '-7 days')
+        ''')
+        recent_votes = cursor.fetchone()[0]
+        st.metric("🗳️ Vote tuần này", recent_votes)
+    
+    conn.close()
+    
+    # Quick actions for admins
+    if st.session_state.user['is_admin']:
+        st.subheader("🔧 Thao tác nhanh")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📧 Gửi nhắc nhở", use_container_width=True):
+                st.info("Tính năng sẽ được cập nhật trong phiên bản tiếp theo")
+        
+        with col2:
+            if st.button("📊 Xuất báo cáo", use_container_width=True):
+                st.info("Tính năng sẽ được cập nhật trong phiên bản tiếp theo")
+        
+        with col3:
+            if st.button("🔄 Đồng bộ dữ liệu", use_container_width=True):
+                st.success("Dữ liệu đã được đồng bộ thành công!")
 
 if __name__ == "__main__":
     main()
-
