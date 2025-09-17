@@ -700,7 +700,7 @@ def show_auth_page():
                 else:
                     st.error("Vui lòng nhập đầy đủ thông tin!")
         
-        st.info("💡 Tài khoản admin mặc định: admin@local / Admin@123")
+        st.info("💡 Cần hỗ trợ xin liên hệ vonnv")
     
     with tab2:
         st.subheader("Đăng ký thành viên mới")
