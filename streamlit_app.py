@@ -203,7 +203,7 @@ def tab_ranking():
         for email, u in members.items()
     ])
 
-    # Tính cột Xếp loại
+    # Hàm tính xếp loại
     def rank_label(wins):
         if wins > 50:
             return "Hạt giống 1"
@@ -219,18 +219,24 @@ def tab_ranking():
     # Sắp xếp giảm dần theo số trận thắng
     df = df.sort_values(by='Số trận thắng', ascending=False).reset_index(drop=True)
 
-    # Cho phép admin sửa số trận thắng
     if st.session_state.user_role == 'admin':
         st.subheader("Chỉnh sửa số trận thắng")
-        edited_df = st.experimental_data_editor(df[['Tên', 'Số trận thắng', 'Xếp loại']], num_rows="dynamic")
+
+        # Tạo DataFrame chỉ gồm cột có thể sửa: 'Tên' (khóa), 'Số trận thắng'
+        df_edit = df[['Tên', 'Số trận thắng']].copy()
+
+        # Reset index để tránh lỗi experimental_data_editor
+        df_edit = df_edit.reset_index(drop=True)
+
+        # Cho phép sửa cột 'Số trận thắng' (kiểu int)
+        edited_df = st.experimental_data_editor(df_edit, num_rows="dynamic")
+
         if st.button("Lưu cập nhật"):
             # Cập nhật lại số trận thắng vào session_state.users
             for idx, row in edited_df.iterrows():
-                # Tìm email theo tên (cẩn thận trùng tên, nên dùng email làm key)
-                # Ở đây dùng tên để tìm email, giả định tên không trùng
                 name = row['Tên']
                 wins_new = int(row['Số trận thắng'])
-                # Tìm email tương ứng
+                # Tìm email tương ứng theo tên (giả định tên không trùng)
                 email = None
                 for e, u in members.items():
                     if u['name'] == name:
@@ -242,9 +248,10 @@ def tab_ranking():
             st.success("Đã cập nhật số trận thắng!")
             st.experimental_rerun()
     else:
+        # Hiển thị bảng cho user thường, có cột Xếp loại
         st.dataframe(df[['Tên', 'Số trận thắng', 'Xếp loại']].style.bar(subset=['Số trận thắng'], color='#4CAF50'))
 
-    # Hiển thị chi tiết trận thắng như trước
+    # Hiển thị chi tiết trận thắng
     st.subheader("Chi tiết trận thắng")
     matches = st.session_state.matches
     if not matches:
@@ -267,7 +274,7 @@ def tab_ranking():
             df_match_display = df_match_display[['Ngày thắng', 'Địa điểm', 'Tỉ số', 'Số trận thắng tối thiểu']]
             st.dataframe(df_match_display)
 
-    # Admin nhập trận thắng mới giữ nguyên như trước
+    # Admin nhập trận thắng mới
     if st.session_state.user_role == 'admin':
         st.subheader("Nhập trận thắng mới cho thành viên")
         with st.form("input_wins"):
