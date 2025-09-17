@@ -411,50 +411,51 @@ def tab_home():
             st.bar_chart(df_vote.set_index('name'))
         else:
             st.info("Chưa có dữ liệu bình chọn tham gia.")
-
-# --- Tab Quản lý tài chính ---
-@st.cache_data  # Cache dữ liệu tĩnh để tối ưu hiệu suất trên cloud
+# --- Tab quản lý tài chính ---
 def tab_finance():
     st.header("💰 Quản lý tài chính")
+    users = st.session_state.users
+    members = [email for email, u in users.items() if u['role']=='member' and u['approved']]
 
-    # Hiển thị tổng số tiền chi tiêu
-    total_expenses = sum(expense.get('amount', 0) for expense in st.session_state.expenses)
-    st.subheader(f"Tổng chi tiêu: {total_expenses:,.0f} VNĐ")
-
-    # Hiển thị danh sách chi tiêu
-    if st.session_state.expenses:
-        df_expenses = pd.DataFrame(st.session_state.expenses)
-        # Đổi tên cột nếu cần
-        df_expenses_display = df_expenses.rename(columns={
-            'date': 'Ngày',
-            'description': 'Mô tả',
-            'amount': 'Số tiền (VNĐ)'
-        })
-        st.dataframe(df_expenses_display.style.format({"Số tiền (VNĐ)": "{:,.0f}"}))
-    else:
-        st.info("Chưa có khoản chi tiêu nào được nhập.")
-
-    st.subheader("Thêm khoản chi tiêu mới")
-    with st.form("add_expense_form"):
-        date_expense = st.date_input("Ngày chi tiêu", value=datetime.today())
-        description = st.text_input("Mô tả chi tiêu")
-        amount = st.number_input("Số tiền (VNĐ)", min_value=0, step=1000)
-        submitted = st.form_submit_button("Thêm chi tiêu")
+    st.subheader("Nhập số tiền đóng góp của thành viên")
+    with st.form("input_contribution"):
+        member_email = st.selectbox("Chọn thành viên", options=members)
+        amount = st.number_input("Số tiền đóng góp (VNĐ)", min_value=0, step=1000)
+        submitted = st.form_submit_button("Cập nhật đóng góp")
         if submitted:
-            if not description:
-                st.error("Vui lòng nhập mô tả chi tiêu.")
-            elif amount <= 0:
-                st.error("Số tiền phải lớn hơn 0.")
+            users[member_email]['balance'] += amount
+            save_all()
+            st.success("Cập nhật đóng góp thành công!")
+            st.rerun()
+
+    if st.session_state.user_role == 'admin':
+        st.subheader("Nhập chi phí buổi tập")
+        with st.form("input_expense"):
+            if not st.session_state.votes:
+                st.info("Chưa có bình chọn nào để xác định người tham gia.")
             else:
-                new_expense = {
-                    'date': date_expense.strftime("%Y-%m-%d"),
-                    'description': description,
-                    'amount': amount
-                }
-                st.session_state.expenses.append(new_expense)
-                save_all()
-                st.success("Đã thêm khoản chi tiêu mới!")
-                st.rerun()
+                vote_dates = [v['date'] for v in st.session_state.votes]
+                date_expense = st.selectbox("Chọn ngày buổi tập", options=vote_dates)
+                cost = st.number_input("Chi phí buổi tập (VNĐ)", min_value=0, step=1000)
+                submitted = st.form_submit_button("Nhập chi phí")
+                if submitted:
+                    vote = next((v for v in st.session_state.votes if v['date'] == date_expense), None)
+                    if vote is None or len(vote['voters']) == 0:
+                        st.error("Ngày này không có thành viên tham gia.")
+                    else:
+                        per_person = cost / len(vote['voters'])
+                        for email in vote['voters']:
+                            users[email]['balance'] -= per_person
+                        st.session_state.expenses.append({'date': date_expense, 'amount': cost, 'participants': vote['voters']})
+                        save_all()
+                        st.success(f"Đã nhập chi phí và trừ tiền cho {len(vote['voters'])} thành viên.")
+                        st.rerun()
+    else:
+        st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
+
+    st.subheader("Số dư tài chính các thành viên")
+    df = pd.DataFrame([{'Tên': users[email]['name'], 'Số tiền còn lại (VNĐ)': users[email]['balance']} for email in members])
+    st.dataframe(df.style.format({"Số tiền còn lại (VNĐ)": "{:,.0f}"}).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800'))
 # --- Main app ---
 def main():
     st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
