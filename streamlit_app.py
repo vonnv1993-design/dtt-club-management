@@ -283,20 +283,6 @@ def tab_ranking():
                     st.experimental_rerun()
 
 # --- Tab Vote ---
-def tab_vote():
-    st.header("🗳️ Bình chọn tham gia chơi")
-    if st.session_state.user_role == 'admin':
-        st.subheader("Tạo bình chọn mới")
-        with st.form("create_vote"):
-            date_vote = st.date_input("Chọn ngày tham gia", value=datetime.today())
-            weekday = date_vote.strftime("%A")
-            weekday_map = {
-                "Monday": "Thứ Hai",
-                "Tuesday": "Thứ Ba",
-                "Wednesday": "Thứ Tư",
-                "Thursday": "Thứ Năm",
-                "Friday": "Thứ Sáu",
-                "Saturday": "Thứ Bảy",
                 "Sunday": "Chủ Nhật"
             }
             weekday_vn = weekday_map.get(weekday, weekday)
@@ -314,112 +300,27 @@ def tab_vote():
                         'description': description,
                         'voters': []
                     })
+                    add_vote_history("Tạo mới", f"Ngày {date_vote.strftime('%Y-%m-%d')}: {description}")
                     save_all()
                     st.success("Tạo bình chọn thành công!")
                     st.experimental_rerun()
-
-    if st.session_state.user_role == 'member':
-        if not st.session_state.votes:
-            st.info("Chưa có bình chọn nào.")
-            return
-        st.subheader("Bình chọn tham gia")
-        for vote in st.session_state.votes:
-            date_str = vote['date']
-            voted = st.session_state.user_email in vote['voters']
-            desc = vote.get('description', '')
-            weekday = vote.get('weekday', '')
-            with st.expander(f"{weekday} - {date_str} - {desc}"):
-                if voted:
-                    st.markdown(f"- ✅ Bạn đã tham gia bình chọn ngày **{date_str}**")
-                else:
-                    if st.button(f"Tham gia ngày {date_str}", key=date_str):
-                        vote['voters'].append(st.session_state.user_email)
-                        save_all()
-                        st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
-                        st.experimental_rerun()
-
+    # Hiển thị lịch sử sửa bình chọn (admin)
+    if st.session_state.user_role == 'admin':
+        st.subheader("📜 Lịch sử sửa bình chọn")
+        if 'vote_history' in st.session_state and st.session_state.vote_history:
+            df_history = pd.DataFrame(st.session_state.vote_history)
+            st.dataframe(df_history.sort_values(by='timestamp', ascending=False))
+        else:
+            st.info("Chưa có lịch sử sửa bình chọn.")
+    # Phần bình chọn cho member và thống kê như trước...
+    # (bỏ cột 'Thứ' trong thống kê)
     st.subheader("Thống kê số lượng vote tham gia")
     if not st.session_state.votes:
         st.info("Chưa có bình chọn nào.")
         return
-    data = [{'Ngày': v['date'], 'Thứ': v.get('weekday', ''), 'Mô tả': v.get('description', ''), 'Số lượng tham gia': len(v['voters'])} for v in st.session_state.votes]
+    data = [{'Ngày': v['date'], 'Mô tả': v.get('description', ''), 'Số lượng tham gia': len(v['voters'])} for v in st.session_state.votes]
     df = pd.DataFrame(data).sort_values(by='Ngày', ascending=False)
     st.dataframe(df.style.bar(subset=['Số lượng tham gia'], color='#2196F3'))
-
-# --- Tab Quản lý tài chính ---
-def tab_finance():
-    st.header("💰 Quản lý tài chính")
-    users = st.session_state.users
-    members = [email for email, u in users.items() if u['role']=='member' and u['approved']]
-
-    st.subheader("Nhập số tiền đóng góp của thành viên")
-    with st.form("input_contribution"):
-        member_email = st.selectbox("Chọn thành viên", options=members)
-        amount = st.number_input("Số tiền đóng góp (VNĐ)", min_value=0, step=1000)
-        submitted = st.form_submit_button("Cập nhật đóng góp")
-        if submitted:
-            users[member_email]['balance'] += amount
-            save_all()
-            st.success("Cập nhật đóng góp thành công!")
-            st.experimental_rerun()
-
-    if st.session_state.user_role == 'admin':
-        st.subheader("Nhập chi phí buổi tập")
-        with st.form("input_expense"):
-            if not st.session_state.votes:
-                st.info("Chưa có bình chọn nào để xác định người tham gia.")
-            else:
-                vote_dates = [v['date'] for v in st.session_state.votes]
-                date_expense = st.selectbox("Chọn ngày buổi tập", options=vote_dates)
-                cost = st.number_input("Chi phí buổi tập (VNĐ)", min_value=0, step=1000)
-                submitted = st.form_submit_button("Nhập chi phí")
-                if submitted:
-                    vote = next((v for v in st.session_state.votes if v['date'] == date_expense), None)
-                    if vote is None or len(vote['voters']) == 0:
-                        st.error("Ngày này không có thành viên tham gia.")
-                    else:
-                        per_person = cost / len(vote['voters'])
-                        for email in vote['voters']:
-                            users[email]['balance'] -= per_person
-                        st.session_state.expenses.append({'date': date_expense, 'amount': cost, 'participants': vote['voters']})
-                        save_all()
-                        st.success(f"Đã nhập chi phí và trừ tiền cho {len(vote['voters'])} thành viên.")
-                        st.experimental_rerun()
-    else:
-        st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
-
-    st.subheader("Số dư tài chính các thành viên")
-    attendance_count = {email: 0 for email in members}
-    for vote in st.session_state.votes:
-        for voter in vote['voters']:
-            if voter in attendance_count:
-                attendance_count[voter] += 1
-
-    total_expense = sum(e['amount'] for e in st.session_state.expenses)
-    total_sessions = len(st.session_state.votes) if st.session_state.votes else 1
-    avg_cost_per_session = total_expense / total_sessions if total_sessions > 0 else 0
-
-    data = []
-    for email in members:
-        name = users[email]['name']
-        balance = users[email]['balance']
-        sessions = attendance_count.get(email, 0)
-        need_pay = sessions * avg_cost_per_session
-        data.append({
-            'Tên': name,
-            'Buổi tập': sessions,
-            'Số tiền cần đóng góp (VNĐ)': need_pay,
-            'Số tiền còn lại (VNĐ)': balance
-        })
-
-    df = pd.DataFrame(data)
-    st.dataframe(
-        df.style.format({
-            "Số tiền cần đóng góp (VNĐ)": "{:,.0f}",
-            "Số tiền còn lại (VNĐ)": "{:,.0f}"
-        }).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800')
-    )
-
 # --- Tab Home ---
 def tab_home():
     st.header("📊 Trang chủ - Thống kê tổng quan")
