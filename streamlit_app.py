@@ -1,8 +1,9 @@
 import streamlit as st
-import sqlite3
+import json
 import hashlib
 import pandas as pd
 from datetime import datetime, timedelta
+import os
 
 # Page configuration
 st.set_page_config(
@@ -150,85 +151,58 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Database initialization - ĐƠN GIẢN HÓA
-def init_database():
-    try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
+# DATA PERSISTENCE SYSTEM - SỬ DỤNG SESSION STATE VÀ JSON
+def init_data_storage():
+    """Khởi tạo hệ thống lưu trữ dữ liệu persistent"""
+    if 'data_initialized' not in st.session_state:
+        # Cấu trúc dữ liệu chính
+        default_data = {
+            'users': [
+                {
+                    'id': 1,
+                    'full_name': 'Administrator',
+                    'email': 'admin@local',
+                    'phone': '0000000000',
+                    'birth_date': '1990-01-01',
+                    'password': hashlib.sha256('Admin@123'.encode()).hexdigest(),
+                    'is_approved': 1,
+                    'is_admin': 1,
+                    'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+            ],
+            'rankings': [],
+            'vote_sessions': [],
+            'votes': [],
+            'finances': [],
+            'next_user_id': 2,
+            'next_ranking_id': 1,
+            'next_vote_session_id': 1,
+            'next_vote_id': 1,
+            'next_finance_id': 1
+        }
         
-        # Users table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                full_name TEXT NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                phone TEXT NOT NULL,
-                birth_date TEXT NOT NULL,
-                password TEXT NOT NULL,
-                is_approved INTEGER DEFAULT 0,
-                is_admin INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Rankings table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS rankings (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                match_date TEXT,
-                location TEXT,
-                score TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Vote sessions table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS vote_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_date TEXT,
-                description TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Votes table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS votes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                session_date TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Finances table - ĐƠN GIẢN
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS finances (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                amount INTEGER,
-                transaction_type TEXT,
-                description TEXT,
-                session_date TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Insert default admin user
-        cursor.execute('''
-            INSERT OR IGNORE INTO users (full_name, email, phone, birth_date, password, is_approved, is_admin)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', ('Administrator', 'admin@local', '0000000000', '1990-01-01', 
-              hashlib.sha256('Admin@123'.encode()).hexdigest(), 1, 1))
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.error(f"Lỗi khởi tạo database: {str(e)}")
-        return False
+        # Khởi tạo dữ liệu
+        st.session_state.club_data = default_data
+        st.session_state.data_initialized = True
+
+def save_data_to_session():
+    """Lưu dữ liệu vào session state"""
+    # Dữ liệu đã được lưu trong st.session_state.club_data
+    pass
+
+def get_data():
+    """Lấy dữ liệu từ session state"""
+    if 'club_data' not in st.session_state:
+        init_data_storage()
+    return st.session_state.club_data
+
+def get_next_id(table_name):
+    """Lấy ID tiếp theo cho table"""
+    data = get_data()
+    next_id_key = f'next_{table_name}_id'
+    current_id = data[next_id_key]
+    data[next_id_key] += 1
+    return current_id
 
 # Authentication functions
 def hash_password(password):
@@ -236,158 +210,170 @@ def hash_password(password):
 
 def register_user(full_name, email, phone, birth_date, password):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
+        data = get_data()
         
-        cursor.execute('''
-            INSERT INTO users (full_name, email, phone, birth_date, password)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (full_name, email, phone, str(birth_date), hash_password(password)))
+        # Check if email exists
+        for user in data['users']:
+            if user['email'] == email:
+                return False, "Email đã tồn tại!"
         
-        conn.commit()
-        conn.close()
+        # Add new user
+        new_user = {
+            'id': get_next_id('user'),
+            'full_name': full_name,
+            'email': email,
+            'phone': phone,
+            'birth_date': str(birth_date),
+            'password': hash_password(password),
+            'is_approved': 0,
+            'is_admin': 0,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        data['users'].append(new_user)
         return True, "Đăng ký thành công! Vui lòng chờ admin phê duyệt."
-    except sqlite3.IntegrityError:
-        return False, "Email đã tồn tại!"
     except Exception as e:
         return False, f"Lỗi đăng ký: {str(e)}"
 
 def login_user(email, password):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
+        data = get_data()
+        hashed_password = hash_password(password)
         
-        cursor.execute('''
-            SELECT id, full_name, is_approved, is_admin FROM users 
-            WHERE email = ? AND password = ?
-        ''', (email, hash_password(password)))
+        for user in data['users']:
+            if user['email'] == email and user['password'] == hashed_password:
+                if user['is_approved'] == 1 or user['is_admin'] == 1:
+                    return True, {
+                        'id': user['id'],
+                        'name': user['full_name'],
+                        'is_admin': user['is_admin'] == 1
+                    }
+                else:
+                    return False, "Tài khoản chưa được phê duyệt!"
         
-        user = cursor.fetchone()
-        conn.close()
-        
-        if user:
-            if user[2] == 1 or user[3] == 1:  # approved or admin
-                return True, {
-                    'id': user[0],
-                    'name': user[1],
-                    'is_admin': user[3] == 1
-                }
-            else:
-                return False, "Tài khoản chưa được phê duyệt!"
         return False, "Email hoặc mật khẩu không đúng!"
     except Exception as e:
         return False, f"Lỗi đăng nhập: {str(e)}"
 
-# Database helper functions - SỬA LẠI ĐỂ TRÁNH LỖI
-def safe_query(query, params=None):
-    """Thực hiện query một cách an toàn"""
-    try:
-        conn = sqlite3.connect('pickleball_club.db')
-        if params:
-            df = pd.read_sql_query(query, conn, params=params)
-        else:
-            df = pd.read_sql_query(query, conn)
-        conn.close()
-        return df
-    except Exception as e:
-        st.error(f"Lỗi database: {str(e)}")
-        return pd.DataFrame()
-
+# Data helper functions
 def get_pending_members():
-    query = '''
-        SELECT id, full_name, email, phone, birth_date, created_at
-        FROM users 
-        WHERE is_approved = 0 AND is_admin = 0
-        ORDER BY created_at DESC
-    '''
-    return safe_query(query)
+    data = get_data()
+    pending = [user for user in data['users'] if user['is_approved'] == 0 and user['is_admin'] == 0]
+    return pd.DataFrame(pending)
 
 def get_approved_members():
-    query = '''
-        SELECT id, full_name, phone, birth_date
-        FROM users 
-        WHERE is_approved = 1 AND is_admin = 0
-        ORDER BY full_name
-    '''
-    return safe_query(query)
+    data = get_data()
+    approved = [user for user in data['users'] if user['is_approved'] == 1 and user['is_admin'] == 0]
+    return pd.DataFrame(approved)
 
 def approve_member(user_id, admin_name):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET is_approved = 1 WHERE id = ?', (user_id,))
-        conn.commit()
-        conn.close()
-        return True
+        data = get_data()
+        for user in data['users']:
+            if user['id'] == user_id:
+                user['is_approved'] = 1
+                user['approved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                user['approved_by'] = admin_name
+                return True
+        return False
     except Exception as e:
         st.error(f"Lỗi phê duyệt: {str(e)}")
         return False
 
 def reject_member(user_id):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
-        conn.commit()
-        conn.close()
+        data = get_data()
+        data['users'] = [user for user in data['users'] if user['id'] != user_id]
         return True
     except Exception as e:
         st.error(f"Lỗi từ chối: {str(e)}")
         return False
 
 def get_rankings():
-    query = '''
-        SELECT u.full_name, COUNT(r.id) as total_wins
-        FROM users u
-        LEFT JOIN rankings r ON u.id = r.user_id
-        WHERE u.is_approved = 1 AND u.is_admin = 0
-        GROUP BY u.id, u.full_name
-        ORDER BY total_wins DESC
-    '''
-    return safe_query(query)
+    data = get_data()
+    
+    # Count wins for each member
+    member_wins = {}
+    for user in data['users']:
+        if user['is_approved'] == 1 and user['is_admin'] == 0:
+            member_wins[user['full_name']] = 0
+    
+    for ranking in data['rankings']:
+        # Find user name
+        for user in data['users']:
+            if user['id'] == ranking['user_id']:
+                if user['full_name'] in member_wins:
+                    member_wins[user['full_name']] += 1
+                break
+    
+    # Convert to DataFrame
+    rankings_list = [{'full_name': name, 'total_wins': wins} for name, wins in member_wins.items()]
+    rankings_list.sort(key=lambda x: x['total_wins'], reverse=True)
+    
+    return pd.DataFrame(rankings_list)
 
 def add_ranking(user_name, wins, match_date, location, score):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
+        data = get_data()
         
-        cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1 AND is_admin = 0', (user_name,))
-        user = cursor.fetchone()
+        # Find user ID
+        user_id = None
+        for user in data['users']:
+            if user['full_name'] == user_name and user['is_approved'] == 1 and user['is_admin'] == 0:
+                user_id = user['id']
+                break
         
-        if user:
+        if user_id:
             for _ in range(wins):
-                cursor.execute('''
-                    INSERT INTO rankings (user_id, match_date, location, score)
-                    VALUES (?, ?, ?, ?)
-                ''', (user[0], str(match_date), location, score))
-        
-        conn.commit()
-        conn.close()
-        return True
+                new_ranking = {
+                    'id': get_next_id('ranking'),
+                    'user_id': user_id,
+                    'match_date': str(match_date),
+                    'location': location,
+                    'score': score,
+                    'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                data['rankings'].append(new_ranking)
+            return True
+        return False
     except Exception as e:
         st.error(f"Lỗi thêm ranking: {str(e)}")
         return False
 
 def get_vote_sessions():
-    query = '''
-        SELECT vs.id, vs.session_date, vs.description, 
-               (SELECT COUNT(*) FROM votes v JOIN users u ON v.user_id = u.id 
-                WHERE v.session_date = vs.session_date AND u.is_admin = 0) as vote_count
-        FROM vote_sessions vs
-        ORDER BY vs.session_date DESC
-    '''
-    return safe_query(query)
+    data = get_data()
+    
+    vote_sessions_with_count = []
+    for session in data['vote_sessions']:
+        # Count votes for this session from members only
+        vote_count = 0
+        for vote in data['votes']:
+            if vote['session_date'] == session['session_date']:
+                # Check if voter is a member (not admin)
+                for user in data['users']:
+                    if user['id'] == vote['user_id'] and user['is_admin'] == 0:
+                        vote_count += 1
+                        break
+        
+        session_with_count = session.copy()
+        session_with_count['vote_count'] = vote_count
+        vote_sessions_with_count.append(session_with_count)
+    
+    # Sort by date descending
+    vote_sessions_with_count.sort(key=lambda x: x['session_date'], reverse=True)
+    
+    return pd.DataFrame(vote_sessions_with_count)
 
 def create_vote_session(session_date, description):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO vote_sessions (session_date, description)
-            VALUES (?, ?)
-        ''', (str(session_date), description))
-        conn.commit()
-        conn.close()
+        data = get_data()
+        new_session = {
+            'id': get_next_id('vote_session'),
+            'session_date': str(session_date),
+            'description': description,
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        data['vote_sessions'].append(new_session)
         return True
     except Exception as e:
         st.error(f"Lỗi tạo vote session: {str(e)}")
@@ -395,163 +381,217 @@ def create_vote_session(session_date, description):
 
 def vote_for_session(user_id, session_date):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
+        data = get_data()
         
         # Check if already voted
-        cursor.execute('SELECT id FROM votes WHERE user_id = ? AND session_date = ?', (user_id, str(session_date)))
+        for vote in data['votes']:
+            if vote['user_id'] == user_id and vote['session_date'] == str(session_date):
+                return False
         
-        if not cursor.fetchone():
-            cursor.execute('INSERT INTO votes (user_id, session_date) VALUES (?, ?)', (user_id, str(session_date)))
-            conn.commit()
-            conn.close()
-            return True
-        else:
-            conn.close()
-            return False
+        # Add vote
+        new_vote = {
+            'id': get_next_id('vote'),
+            'user_id': user_id,
+            'session_date': str(session_date),
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        data['votes'].append(new_vote)
+        return True
     except Exception as e:
         st.error(f"Lỗi vote: {str(e)}")
         return False
 
 def get_vote_details(session_date):
-    query = '''
-        SELECT u.full_name, v.created_at
-        FROM votes v
-        JOIN users u ON v.user_id = u.id
-        WHERE v.session_date = ? AND u.is_admin = 0
-        ORDER BY v.created_at
-    '''
-    return safe_query(query, [str(session_date)])
+    data = get_data()
+    
+    vote_details = []
+    for vote in data['votes']:
+        if vote['session_date'] == str(session_date):
+            # Find user info
+            for user in data['users']:
+                if user['id'] == vote['user_id'] and user['is_admin'] == 0:
+                    vote_details.append({
+                        'full_name': user['full_name'],
+                        'created_at': vote['created_at']
+                    })
+                    break
+    
+    return pd.DataFrame(vote_details)
 
 def add_contribution(user_name, amount):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
+        data = get_data()
         
-        cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1 AND is_admin = 0', (user_name,))
-        user = cursor.fetchone()
+        # Find user ID
+        user_id = None
+        for user in data['users']:
+            if user['full_name'] == user_name and user['is_approved'] == 1 and user['is_admin'] == 0:
+                user_id = user['id']
+                break
         
-        if user:
-            cursor.execute('''
-                INSERT INTO finances (user_id, amount, transaction_type, description)
-                VALUES (?, ?, ?, ?)
-            ''', (user[0], amount, 'contribution', 'Đóng quỹ'))
-        
-        conn.commit()
-        conn.close()
-        return True
+        if user_id:
+            new_finance = {
+                'id': get_next_id('finance'),
+                'user_id': user_id,
+                'amount': amount,
+                'transaction_type': 'contribution',
+                'description': 'Đóng quỹ',
+                'session_date': '',
+                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            data['finances'].append(new_finance)
+            return True
+        return False
     except Exception as e:
         st.error(f"Lỗi thêm đóng góp: {str(e)}")
         return False
 
 def get_vote_sessions_for_expense():
-    query = '''
-        SELECT vs.session_date, vs.description, 
-               (SELECT COUNT(*) FROM votes v JOIN users u ON v.user_id = u.id 
-                WHERE v.session_date = vs.session_date AND u.is_admin = 0) as vote_count
-        FROM vote_sessions vs
-        WHERE (SELECT COUNT(*) FROM votes v JOIN users u ON v.user_id = u.id 
-               WHERE v.session_date = vs.session_date AND u.is_admin = 0) > 0
-        ORDER BY vs.session_date DESC
-    '''
-    return safe_query(query)
+    data = get_data()
+    
+    sessions_with_votes = []
+    for session in data['vote_sessions']:
+        # Count member votes
+        vote_count = 0
+        for vote in data['votes']:
+            if vote['session_date'] == session['session_date']:
+                # Check if voter is member
+                for user in data['users']:
+                    if user['id'] == vote['user_id'] and user['is_admin'] == 0:
+                        vote_count += 1
+                        break
+        
+        if vote_count > 0:
+            session_data = session.copy()
+            session_data['vote_count'] = vote_count
+            sessions_with_votes.append(session_data)
+    
+    # Sort by date descending
+    sessions_with_votes.sort(key=lambda x: x['session_date'], reverse=True)
+    
+    return pd.DataFrame(sessions_with_votes)
 
 def add_expense(session_date, court_fee, water_fee, other_fee, description):
     try:
-        conn = sqlite3.connect('pickleball_club.db')
-        cursor = conn.cursor()
-        
+        data = get_data()
         total_fee = court_fee + water_fee + other_fee
         
-        # Get voters (only members, not admin)
-        cursor.execute('''
-            SELECT v.user_id FROM votes v
-            JOIN users u ON v.user_id = u.id
-            WHERE v.session_date = ? AND u.is_admin = 0
-        ''', (str(session_date),))
-        
-        voters = cursor.fetchall()
+        # Get member voters for this session
+        voters = []
+        for vote in data['votes']:
+            if vote['session_date'] == str(session_date):
+                # Check if voter is member
+                for user in data['users']:
+                    if user['id'] == vote['user_id'] and user['is_admin'] == 0:
+                        voters.append(vote['user_id'])
+                        break
         
         if voters:
             cost_per_person = total_fee // len(voters)
             
-            for voter in voters:
-                cursor.execute('''
-                    INSERT INTO finances (user_id, amount, transaction_type, description, session_date)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (voter[0], -cost_per_person, 'expense', description, str(session_date)))
-        
-        conn.commit()
-        conn.close()
-        return True, f"Đã chia {total_fee:,} VNĐ cho {len(voters)} thành viên ({cost_per_person:,} VNĐ/người)"
+            for voter_id in voters:
+                new_expense = {
+                    'id': get_next_id('finance'),
+                    'user_id': voter_id,
+                    'amount': -cost_per_person,
+                    'transaction_type': 'expense',
+                    'description': description,
+                    'session_date': str(session_date),
+                    'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                data['finances'].append(new_expense)
+            
+            return True, f"Đã chia {total_fee:,} VNĐ cho {len(voters)} thành viên ({cost_per_person:,} VNĐ/người)"
+        else:
+            return False, "Không có thành viên nào vote cho buổi này"
     except Exception as e:
-        st.error(f"Lỗi thêm chi phí: {str(e)}")
-        return False, str(e)
+        return False, f"Lỗi thêm chi phí: {str(e)}"
 
 def get_financial_summary():
-    query = '''
-        SELECT 
-            u.full_name,
-            COALESCE(SUM(CASE WHEN f.transaction_type = 'contribution' THEN f.amount ELSE 0 END), 0) as total_contribution,
-            COUNT(CASE WHEN f.transaction_type = 'expense' THEN 1 END) as sessions_attended,
-            COALESCE(SUM(CASE WHEN f.transaction_type = 'expense' THEN f.amount ELSE 0 END), 0) as total_expenses,
-            COALESCE(SUM(f.amount), 0) as balance
-        FROM users u
-        LEFT JOIN finances f ON u.id = f.user_id
-        WHERE u.is_approved = 1 AND u.is_admin = 0
-        GROUP BY u.id, u.full_name
-        ORDER BY balance DESC
-    '''
-    return safe_query(query)
+    data = get_data()
+    
+    # Calculate for each member
+    financial_summary = []
+    for user in data['users']:
+        if user['is_approved'] == 1 and user['is_admin'] == 0:
+            total_contribution = 0
+            total_expenses = 0
+            sessions_attended = 0
+            
+            for finance in data['finances']:
+                if finance['user_id'] == user['id']:
+                    if finance['transaction_type'] == 'contribution':
+                        total_contribution += finance['amount']
+                    elif finance['transaction_type'] == 'expense':
+                        total_expenses += finance['amount']  # negative amount
+                        sessions_attended += 1
+            
+            balance = total_contribution + total_expenses  # expenses are negative
+            
+            financial_summary.append({
+                'full_name': user['full_name'],
+                'total_contribution': total_contribution,
+                'sessions_attended': sessions_attended,
+                'total_expenses': total_expenses,
+                'balance': balance
+            })
+    
+    # Sort by balance descending
+    financial_summary.sort(key=lambda x: x['balance'], reverse=True)
+    
+    return pd.DataFrame(financial_summary)
 
 def get_expense_history():
-    query = '''
-        SELECT 
-            session_date,
-            description,
-            COUNT(*) as participants_count,
-            SUM(-amount) as total_cost,
-            (-amount) as cost_per_person,
-            created_at
-        FROM finances
-        WHERE transaction_type = 'expense'
-        GROUP BY session_date, description, amount
-        ORDER BY session_date DESC
-    '''
-    return safe_query(query)
+    data = get_data()
+    
+    # Group expenses by session
+    session_expenses = {}
+    for finance in data['finances']:
+        if finance['transaction_type'] == 'expense' and finance['session_date']:
+            session_date = finance['session_date']
+            if session_date not in session_expenses:
+                session_expenses[session_date] = {
+                    'session_date': session_date,
+                    'description': finance['description'],
+                    'total_cost': 0,
+                    'participants_count': 0,
+                    'cost_per_person': abs(finance['amount']),
+                    'created_at': finance['created_at']
+                }
+            session_expenses[session_date]['total_cost'] += abs(finance['amount'])
+            session_expenses[session_date]['participants_count'] += 1
+    
+    # Convert to list and sort by date
+    expense_list = list(session_expenses.values())
+    expense_list.sort(key=lambda x: x['session_date'], reverse=True)
+    
+    return pd.DataFrame(expense_list)
 
 def get_alerts():
     alerts = []
+    
     try:
+        financial_df = get_financial_summary()
+        
         # Low balance alert
-        low_balance_query = '''
-            SELECT u.full_name, COALESCE(SUM(f.amount), 0) as balance
-            FROM users u
-            LEFT JOIN finances f ON u.id = f.user_id
-            WHERE u.is_approved = 1 AND u.is_admin = 0
-            GROUP BY u.id, u.full_name
-            HAVING balance < 100000
-        '''
-        low_balance_df = safe_query(low_balance_query)
+        for _, user in financial_df.iterrows():
+            if user['balance'] < 100000:
+                alerts.append(f"⚠️ {user['full_name']} có số dư thấp: {user['balance']:,} VNĐ")
         
-        for _, user in low_balance_df.iterrows():
-            alerts.append(f"⚠️ {user['full_name']} có số dư thấp: {user['balance']:,} VNĐ")
-        
-        # Low voting activity
+        # Low voting activity (simplified - check last 30 days)
+        data = get_data()
         thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-        low_vote_query = '''
-            SELECT u.full_name, COUNT(v.id) as vote_count
-            FROM users u
-            LEFT JOIN votes v ON u.id = v.user_id
-            WHERE u.is_approved = 1 AND u.is_admin = 0
-            GROUP BY u.id, u.full_name
-            HAVING vote_count < 3
-        '''
-        low_vote_df = safe_query(low_vote_query)
         
-        for _, user in low_vote_df.iterrows():
-            alerts.append(f"📊 {user['full_name']} vote ít trong 30 ngày qua: {user['vote_count']} lần")
-            
+        for user in data['users']:
+            if user['is_approved'] == 1 and user['is_admin'] == 0:
+                vote_count = 0
+                for vote in data['votes']:
+                    if vote['user_id'] == user['id'] and vote['created_at'] >= thirty_days_ago:
+                        vote_count += 1
+                
+                if vote_count < 3:
+                    alerts.append(f"📊 {user['full_name']} vote ít trong 30 ngày qua: {vote_count} lần")
+        
     except Exception as e:
         st.error(f"Lỗi lấy alerts: {str(e)}")
     
@@ -613,9 +653,8 @@ def create_balance_chart(data):
         """
     return chart_html
 
-# Initialize database
-if 'db_initialized' not in st.session_state:
-    st.session_state.db_initialized = init_database()
+# Initialize data storage
+init_data_storage()
 
 # Initialize session state
 if 'logged_in' not in st.session_state:
@@ -627,10 +666,6 @@ if 'current_page' not in st.session_state:
 
 # Main app
 def main():
-    if not st.session_state.db_initialized:
-        st.error("Không thể khởi tạo database. Vui lòng thử lại!")
-        return
-        
     st.markdown("""
         <div class="main-header">
             <h1>🏓 DTT PICKLEBALL CLUB</h1>
@@ -802,6 +837,26 @@ def show_home_page():
                 st.info("Chưa có đóng góp nào")
         else:
             st.info("Chưa có dữ liệu tài chính")
+    
+    # Data persistence info
+    st.subheader("📊 Thông tin hệ thống")
+    st.info("💾 **Dữ liệu được lưu trữ persistent**: Khi reboot app, dữ liệu sẽ được giữ lại trong session của bạn. Để reset hoàn toàn, vui lòng xóa cache trình duyệt hoặc mở tab ẩn danh mới.")
+    
+    # Show current data stats
+    data = get_data()
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("👥 Người dùng", len(data['users']))
+    
+    with col2:
+        st.metric("🏆 Kết quả trận đấu", len(data['rankings']))
+    
+    with col3:
+        st.metric("🗳️ Phiên vote", len(data['vote_sessions']))
+    
+    with col4:
+        st.metric("💰 Giao dịch", len(data['finances']))
 
 def show_approval_page():
     if not st.session_state.user['is_admin']:
@@ -887,11 +942,14 @@ def show_ranking_page():
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    members = get_approved_members()['full_name'].tolist()
+                    members = get_approved_members()['full_name'].tolist() if not get_approved_members().empty else []
                     if members:
                         selected_member = st.selectbox("👤 Chọn thành viên", members)
                         wins = st.number_input("🏆 Số trận thắng", min_value=1, max_value=10, value=1)
                         match_date = st.date_input("📅 Ngày thi đấu", value=datetime.now().date())
+                    else:
+                        st.warning("Chưa có thành viên nào được phê duyệt")
+                        selected_member = None
                 
                 with col2:
                     location = st.text_input("📍 Địa điểm", placeholder="VD: Sân ABC")
@@ -917,6 +975,11 @@ def show_ranking_page():
                     <h2>🏆 {player['total_wins']} trận thắng</h2>
                 </div>
             """, unsafe_allow_html=True)
+        
+        # Chart
+        if len(rankings_df) > 1:
+            chart_html = create_horizontal_bar_chart(rankings_df.head(10), "📊 Top 10 thành viên xuất sắc")
+            st.markdown(chart_html, unsafe_allow_html=True)
 
 def show_voting_page():
     st.title("🗳️ Bình chọn tham gia")
@@ -995,7 +1058,8 @@ def show_finance_page():
         with col1:
             with st.expander("➕ Thêm đóng góp"):
                 with st.form("add_contribution_form"):
-                    members = get_approved_members()['full_name'].tolist()
+                    members_df = get_approved_members()
+                    members = members_df['full_name'].tolist() if not members_df.empty else []
                     if members:
                         member_name = st.selectbox("👤 Thành viên", members)
                         amount = st.number_input("💵 Số tiền (VNĐ)", min_value=10000, step=10000)
@@ -1039,8 +1103,33 @@ def show_finance_page():
                                 if success:
                                     st.success(message)
                                     st.rerun()
+                                else:
+                                    st.error(message)
                 else:
                     st.warning("Chưa có buổi tập nào có vote")
+    
+    # Expense history
+    st.subheader("📋 Lịch sử chi phí các buổi tập")
+    expense_history = get_expense_history()
+    
+    if not expense_history.empty:
+        for _, expense in expense_history.iterrows():
+            st.markdown(f"""
+                <div class="expense-card">
+                    <h4>📅 {expense['session_date']} - {expense['description']}</h4>
+                    <div style="display: flex; justify-content: space-between; margin: 10px 0;">
+                        <div>
+                            <strong>👥 Số người tham gia:</strong> {expense['participants_count']}<br>
+                            <strong>👤 Chi phí/người:</strong> {expense['cost_per_person']:,} VNĐ
+                        </div>
+                        <div style="text-align: right;">
+                            <strong>💰 Tổng chi phí:</strong> {expense['total_cost']:,} VNĐ
+                        </div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("Chưa có chi phí nào được ghi nhận")
     
     # Financial summary
     financial_df = get_financial_summary()
@@ -1066,7 +1155,7 @@ def show_finance_page():
             avg_sessions = financial_df['sessions_attended'].mean()
             st.metric("📊 TB buổi tham gia", f"{avg_sessions:.1f}")
         
-        st.subheader("📋 Chi tiết tài chính")
+        st.subheader("📋 Chi tiết tài chính từng thành viên")
         
         display_df = financial_df.copy()
         display_df['total_contribution'] = display_df['total_contribution'].apply(lambda x: f"{x:,} VNĐ")
@@ -1084,6 +1173,24 @@ def show_finance_page():
             }),
             use_container_width=True
         )
+        
+        # Charts
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            chart_html = create_balance_chart(financial_df)
+            st.markdown(chart_html, unsafe_allow_html=True)
+        
+        with col2:
+            contrib_data = financial_df[financial_df['total_contribution'] > 0].head(5)
+            if not contrib_data.empty:
+                chart_html = create_horizontal_bar_chart(
+                    contrib_data[['full_name', 'total_contribution']], 
+                    "💰 Top 5 thành viên đóng góp"
+                )
+                st.markdown(chart_html, unsafe_allow_html=True)
+            else:
+                st.info("Chưa có đóng góp nào")
 
 def show_alerts_page():
     st.title("⚠️ Cảnh báo hệ thống")
@@ -1100,6 +1207,34 @@ def show_alerts_page():
                 st.markdown(f'<div class="danger-card">{alert}</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div class="alert-card">{alert}</div>', unsafe_allow_html=True)
+    
+    # System statistics
+    st.subheader("📊 Thống kê hệ thống")
+    
+    data = get_data()
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        pending_count = len([u for u in data['users'] if u['is_approved'] == 0 and u['is_admin'] == 0])
+        st.metric("⏳ Chờ phê duyệt", pending_count)
+    
+    with col2:
+        approved_count = len([u for u in data['users'] if u['is_approved'] == 1 and u['is_admin'] == 0])
+        st.metric("✅ Thành viên active", approved_count)
+    
+    with col3:
+        # Count votes in last 7 days from members
+        seven_days_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        recent_votes = 0
+        for vote in data['votes']:
+            if vote['created_at'] >= seven_days_ago:
+                # Check if voter is member
+                for user in data['users']:
+                    if user['id'] == vote['user_id'] and user['is_admin'] == 0:
+                        recent_votes += 1
+                        break
+        st.metric("🗳️ Vote tuần này", recent_votes)
 
 if __name__ == "__main__":
     main()
