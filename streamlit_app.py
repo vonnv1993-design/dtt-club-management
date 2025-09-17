@@ -424,7 +424,7 @@ def tab_finance():
         submitted = st.form_submit_button("Cập nhật đóng góp")
         if submitted:
             users[member_email]['balance'] += amount
-            # Giả định lưu tổng đóng góp (nếu cần, thêm trường 'total_contributed' trong user data)
+            # Lưu tổng đóng góp
             if 'total_contributed' not in users[member_email]:
                 users[member_email]['total_contributed'] = 0
             users[member_email]['total_contributed'] += amount
@@ -450,7 +450,7 @@ def tab_finance():
                         per_person = cost / len(vote['voters'])
                         for email in vote['voters']:
                             users[email]['balance'] -= per_person
-                            # Lưu chi phí buổi tập cho thành viên (nếu cần, thêm trường 'total_session_cost')
+                            # Lưu tổng chi phí buổi tập cho thành viên (tổng của per_person cho các buổi họ tham gia)
                             if 'total_session_cost' not in users[email]:
                                 users[email]['total_session_cost'] = 0
                             users[email]['total_session_cost'] += per_person
@@ -462,6 +462,10 @@ def tab_finance():
         st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
 
     st.subheader("Số dư tài chính các thành viên")
+    # Tính tổng chi phí tất cả buổi tập (từ tất cả các lần vote)
+    total_all_expenses = sum(expense.get('amount', 0) for expense in st.session_state.expenses)
+    st.write(f"**Tổng chi phí tất cả buổi tập: {total_all_expenses:,.0f} VNĐ**")
+
     # Tính số buổi tham gia luyện tập
     attendance_count = {email: 0 for email in members}
     for vote in st.session_state.votes:
@@ -477,7 +481,7 @@ def tab_finance():
         total_contributed = users[email].get('total_contributed', max(balance, 0))
         # Số buổi tham gia luyện tập
         sessions = attendance_count.get(email, 0)
-        # Chi phí cho buổi tập (từ trường 'total_session_cost' nếu có)
+        # Chi phí cho buổi tập (tổng chi phí mà thành viên đã trả cho tất cả buổi họ tham gia)
         session_cost = users[email].get('total_session_cost', 0)
         data.append({
             'Tên': name,
