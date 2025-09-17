@@ -231,7 +231,7 @@ def tab_ranking():
                     st.session_state.users[email]['wins'] = wins_new
             save_all()
             st.success("Đã cập nhật số trận thắng!")
-            st.experimental_rerun()
+            st.rerun()
     else:
         st.dataframe(df[['Tên', 'Số trận thắng', 'Xếp loại']].style.bar(subset=['Số trận thắng'], color='#4CAF50'))
 
