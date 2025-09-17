@@ -32,6 +32,19 @@ def init_db():
         wins INTEGER DEFAULT 0,
         created_at TEXT
     )
+    # --- đảm bảo cột 'wins' tồn tại (migration cho DB cũ) ---
+    cur.execute("PRAGMA table_info(users)")
+    cols_info = cur.fetchall()
+    cols = [row[1] for row in cols_info]  # tên cột nằm ở index 1
+    if "wins" not in cols:
+        try:
+            cur.execute("ALTER TABLE users ADD COLUMN wins INTEGER DEFAULT 0")
+            conn.commit()
+            # nếu muốn ghi log: print("Added 'wins' column to users table")
+        except Exception as e:
+            # không bắt app crash ở đây, chỉ log
+            print("Could not add 'wins' column:", e)
+           
     """)
     # events for voting
     cur.execute("""
