@@ -66,6 +66,30 @@ if 'expenses' not in st.session_state:
 if 'matches' not in st.session_state:
     st.session_state.matches = load_json(MATCHES_FILE, [])
 
+if 'vote_history' not in st.session_state:
+    st.session_state.vote_history = []
+
+# --- Hàm lấy tên ngày tiếng Việt ---
+def get_weekday_vn(date_obj):
+    weekday_map = {
+        "Monday": "Thứ Hai",
+        "Tuesday": "Thứ Ba",
+        "Wednesday": "Thứ Tư",
+        "Thursday": "Thứ Năm",
+        "Friday": "Thứ Sáu",
+        "Saturday": "Thứ Bảy",
+        "Sunday": "Chủ Nhật"
+    }
+    return weekday_map.get(date_obj.strftime("%A"), date_obj.strftime("%A"))
+
+# --- Hàm thêm lịch sử sửa bình chọn ---
+def add_vote_history(action, description):
+    st.session_state.vote_history.append({
+        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'action': action,
+        'description': description
+    })
+
 # --- Hàm đăng nhập ---
 def login():
     st.title("🔐 Đăng nhập Câu lạc bộ Pickleball Ban CĐSCN")
@@ -231,7 +255,7 @@ def tab_ranking():
                     st.session_state.users[email]['wins'] = wins_new
             save_all()
             st.success("Đã cập nhật số trận thắng!")
-            st.rerun()
+            st.experimental_rerun()
     else:
         st.dataframe(df[['Tên', 'Số trận thắng', 'Xếp loại']].style.bar(subset=['Số trận thắng'], color='#4CAF50'))
 
@@ -283,37 +307,64 @@ def tab_ranking():
                     st.experimental_rerun()
 
 # --- Tab Vote ---
-                "Sunday": "Chủ Nhật"
-            }
-            weekday_vn = weekday_map.get(weekday, weekday)
+def tab_vote():
+    st.header("🗳️ Bình chọn tham gia chơi")
+
+    # Tạo bình chọn mới (admin)
+    if st.session_state.user_role == 'admin':
+        st.subheader("Tạo bình chọn mới")
+        with st.form("create_vote"):
+            date_vote = st.date_input("Chọn ngày tham gia", value=datetime.today())
+            weekday_vn = get_weekday_vn(date_vote)
             description = st.text_area("Mô tả bình chọn (ví dụ: Buổi tập kỹ thuật, giao hữu...)")
             submitted = st.form_submit_button("Tạo bình chọn")
             if submitted:
-                for v in st.session_state.votes:
-                    if v['date'] == date_vote.strftime("%Y-%m-%d"):
-                        st.warning("Đã có bình chọn cho ngày này.")
-                        break
+                date_str = date_vote.strftime("%Y-%m-%d")
+                if any(v['date'] == date_str for v in st.session_state.votes):
+                    st.warning("Đã có bình chọn cho ngày này.")
                 else:
                     st.session_state.votes.append({
-                        'date': date_vote.strftime("%Y-%m-%d"),
+                        'date': date_str,
                         'weekday': weekday_vn,
                         'description': description,
                         'voters': []
                     })
-                    add_vote_history("Tạo mới", f"Ngày {date_vote.strftime('%Y-%m-%d')}: {description}")
+                    add_vote_history("Tạo mới", f"Ngày {date_str}: {description}")
                     save_all()
                     st.success("Tạo bình chọn thành công!")
                     st.experimental_rerun()
-    # Hiển thị lịch sử sửa bình chọn (admin)
-    if st.session_state.user_role == 'admin':
+
+        # Hiển thị lịch sử sửa bình chọn (admin)
         st.subheader("📜 Lịch sử sửa bình chọn")
-        if 'vote_history' in st.session_state and st.session_state.vote_history:
+        if st.session_state.vote_history:
             df_history = pd.DataFrame(st.session_state.vote_history)
-            st.dataframe(df_history.sort_values(by='timestamp', ascending=False))
+            df_history = df_history.sort_values(by='timestamp', ascending=False)
+            st.dataframe(df_history)
         else:
             st.info("Chưa có lịch sử sửa bình chọn.")
-    # Phần bình chọn cho member và thống kê như trước...
-    # (bỏ cột 'Thứ' trong thống kê)
+
+    # Bình chọn cho member
+    if st.session_state.user_role == 'member':
+        if not st.session_state.votes:
+            st.info("Chưa có bình chọn nào.")
+            return
+        st.subheader("Bình chọn tham gia")
+        for vote in st.session_state.votes:
+            date_str = vote['date']
+            voted = st.session_state.user_email in vote['voters']
+            desc = vote.get('description', '')
+            weekday = vote.get('weekday', '')
+            with st.expander(f"{weekday} - {date_str} - {desc}"):
+                if voted:
+                    st.markdown(f"- ✅ Bạn đã tham gia bình chọn ngày **{date_str}**")
+                else:
+                    if st.button(f"Tham gia ngày {date_str}", key=date_str):
+                        vote['voters'].append(st.session_state.user_email)
+                        save_all()
+                        st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
+                        st.experimental_rerun()
+
+    # Thống kê số lượng vote tham gia (bỏ cột 'Thứ')
     st.subheader("Thống kê số lượng vote tham gia")
     if not st.session_state.votes:
         st.info("Chưa có bình chọn nào.")
@@ -321,6 +372,7 @@ def tab_ranking():
     data = [{'Ngày': v['date'], 'Mô tả': v.get('description', ''), 'Số lượng tham gia': len(v['voters'])} for v in st.session_state.votes]
     df = pd.DataFrame(data).sort_values(by='Ngày', ascending=False)
     st.dataframe(df.style.bar(subset=['Số lượng tham gia'], color='#2196F3'))
+
 # --- Tab Home ---
 def tab_home():
     st.header("📊 Trang chủ - Thống kê tổng quan")
