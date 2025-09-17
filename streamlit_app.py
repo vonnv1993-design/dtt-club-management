@@ -369,6 +369,48 @@ def tab_vote():
     df = pd.DataFrame(data).sort_values(by='Ngày', ascending=False)
     st.dataframe(df.style.bar(subset=['Số lượng tham gia'], color='#2196F3'))
 
+# --- Tab Quản lý tài chính ---
+def tab_finance():
+    st.header("💰 Quản lý tài chính")
+
+    # Hiển thị tổng số tiền chi tiêu
+    total_expenses = sum(expense.get('amount', 0) for expense in st.session_state.expenses)
+    st.subheader(f"Tổng chi tiêu: {total_expenses:,.0f} VNĐ")
+
+    # Hiển thị danh sách chi tiêu
+    if st.session_state.expenses:
+        df_expenses = pd.DataFrame(st.session_state.expenses)
+        # Đổi tên cột nếu cần
+        df_expenses_display = df_expenses.rename(columns={
+            'date': 'Ngày',
+            'description': 'Mô tả',
+            'amount': 'Số tiền (VNĐ)'
+        })
+        st.dataframe(df_expenses_display.style.format({"Số tiền (VNĐ)": "{:,.0f}"}))
+    else:
+        st.info("Chưa có khoản chi tiêu nào được nhập.")
+
+    st.subheader("Thêm khoản chi tiêu mới")
+    with st.form("add_expense_form"):
+        date_expense = st.date_input("Ngày chi tiêu", value=datetime.today())
+        description = st.text_input("Mô tả chi tiêu")
+        amount = st.number_input("Số tiền (VNĐ)", min_value=0, step=1000)
+        submitted = st.form_submit_button("Thêm chi tiêu")
+        if submitted:
+            if not description:
+                st.error("Vui lòng nhập mô tả chi tiêu.")
+            elif amount <= 0:
+                st.error("Số tiền phải lớn hơn 0.")
+            else:
+                new_expense = {
+                    'date': date_expense.strftime("%Y-%m-%d"),
+                    'description': description,
+                    'amount': amount
+                }
+                st.session_state.expenses.append(new_expense)
+                save_all()
+                st.success("Đã thêm khoản chi tiêu mới!")
+                st.experimental_rerun()
 # --- Tab Home ---
 def tab_home():
     st.header("📊 Trang chủ - Thống kê tổng quan")
