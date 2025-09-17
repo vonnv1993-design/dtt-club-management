@@ -33,7 +33,7 @@ def save_all():
 USERS_FILE = "users.json"
 VOTES_FILE = "votes.json"
 EXPENSES_FILE = "expenses.json"
-MATCHES_FILE = "matches.json"  # Lưu thông tin trận thắng chi tiết
+MATCHES_FILE = "matches.json"
 
 # --- Dữ liệu mặc định admin ---
 default_users = {
@@ -49,7 +49,7 @@ default_users = {
     }
 }
 
-# --- Khởi tạo dữ liệu từ file JSON ---
+# --- Khởi tạo dữ liệu ---
 if 'users' not in st.session_state:
     st.session_state.users = load_json(USERS_FILE, default_users)
 
@@ -82,7 +82,7 @@ def login():
                         st.session_state['user_email'] = email
                         st.session_state['user_role'] = user['role']
                         st.success(f"Chào mừng {user['name']}!")
-                        st.rerun()
+                        st.experimental_rerun()
                     else:
                         st.error("⚠️ Tài khoản chưa được phê duyệt. Vui lòng chờ quản trị viên.")
                 else:
@@ -90,7 +90,7 @@ def login():
             else:
                 st.error("❌ Email không tồn tại.")
 
-# --- Hàm đăng ký thành viên ---
+# --- Hàm đăng ký ---
 def register():
     st.title("📝 Đăng ký thành viên mới")
     with st.form("register_form"):
@@ -125,7 +125,7 @@ def register():
             save_all()
             st.success("Đăng ký thành công! Vui lòng chờ quản trị viên phê duyệt.")
 
-# --- Tab phê duyệt thành viên (admin) ---
+# --- Tab phê duyệt thành viên ---
 def admin_approve_users():
     st.header("🛠️ Phê duyệt thành viên mới")
     pending = st.session_state.pending_users
@@ -142,7 +142,7 @@ def admin_approve_users():
                     del st.session_state.pending_users[email]
                     save_all()
                     st.success(f"Đã phê duyệt {email}")
-                    st.rerun()
+                    st.experimental_rerun()
             with col2:
                 if st.button(f"❌ Từ chối {email}", key=f"reject_{email}"):
                     if email in st.session_state.users:
@@ -151,7 +151,7 @@ def admin_approve_users():
                         del st.session_state.pending_users[email]
                     save_all()
                     st.warning(f"Đã từ chối {email}")
-                    st.rerun()
+                    st.experimental_rerun()
 
 # --- Tab danh sách thành viên ---
 def tab_members():
@@ -162,8 +162,7 @@ def tab_members():
         st.info("Chưa có thành viên nào được phê duyệt.")
         return
 
-    # Tính số lần tham gia luyện tập (số lần vote)
-    attendance_count = {email: 0 for email in st.session_state.users if st.session_state.users[email]['role']=='member' and st.session_state.users[email]['approved']}
+    attendance_count = {email: 0 for email in users if users[email]['role']=='member' and users[email]['approved']}
     for vote in st.session_state.votes:
         for voter in vote['voters']:
             if voter in attendance_count:
@@ -171,9 +170,9 @@ def tab_members():
 
     data = []
     for u in members:
-        email = None
         # Tìm email tương ứng user
-        for e, user in st.session_state.users.items():
+        email = None
+        for e, user in users.items():
             if user == u:
                 email = e
                 break
@@ -197,13 +196,11 @@ def tab_ranking():
         st.info("Chưa có thành viên nào được phê duyệt.")
         return
 
-    # Tạo DataFrame từ members
     df = pd.DataFrame([
         {'email': email, 'Tên': u['name'], 'Số trận thắng': u['wins']}
         for email, u in members.items()
     ])
 
-    # Hàm tính xếp loại
     def rank_label(wins):
         if wins > 50:
             return "Hạt giống 1"
@@ -215,28 +212,17 @@ def tab_ranking():
             return ""
 
     df['Xếp loại'] = df['Số trận thắng'].apply(rank_label)
-
-    # Sắp xếp giảm dần theo số trận thắng
     df = df.sort_values(by='Số trận thắng', ascending=False).reset_index(drop=True)
 
     if st.session_state.user_role == 'admin':
         st.subheader("Chỉnh sửa số trận thắng")
-
-        # Tạo DataFrame chỉ gồm cột có thể sửa: 'Tên' (khóa), 'Số trận thắng'
-        df_edit = df[['Tên', 'Số trận thắng']].copy()
-
-        # Reset index để tránh lỗi experimental_data_editor
-        df_edit = df_edit.reset_index(drop=True)
-
-        # Cho phép sửa cột 'Số trận thắng' (kiểu int)
+        df_edit = df[['Tên', 'Số trận thắng']].copy().reset_index(drop=True)
         edited_df = st.experimental_data_editor(df_edit, num_rows="dynamic")
 
         if st.button("Lưu cập nhật"):
-            # Cập nhật lại số trận thắng vào session_state.users
             for idx, row in edited_df.iterrows():
                 name = row['Tên']
                 wins_new = int(row['Số trận thắng'])
-                # Tìm email tương ứng theo tên (giả định tên không trùng)
                 email = None
                 for e, u in members.items():
                     if u['name'] == name:
@@ -248,10 +234,8 @@ def tab_ranking():
             st.success("Đã cập nhật số trận thắng!")
             st.experimental_rerun()
     else:
-        # Hiển thị bảng cho user thường, có cột Xếp loại
         st.dataframe(df[['Tên', 'Số trận thắng', 'Xếp loại']].style.bar(subset=['Số trận thắng'], color='#4CAF50'))
 
-    # Hiển thị chi tiết trận thắng
     st.subheader("Chi tiết trận thắng")
     matches = st.session_state.matches
     if not matches:
@@ -274,7 +258,6 @@ def tab_ranking():
             df_match_display = df_match_display[['Ngày thắng', 'Địa điểm', 'Tỉ số', 'Số trận thắng tối thiểu']]
             st.dataframe(df_match_display)
 
-    # Admin nhập trận thắng mới
     if st.session_state.user_role == 'admin':
         st.subheader("Nhập trận thắng mới cho thành viên")
         with st.form("input_wins"):
@@ -298,8 +281,9 @@ def tab_ranking():
                     })
                     save_all()
                     st.success("Đã thêm trận thắng thành công!")
-                    st.rerun()
-# --- Tab Vote tham gia chơi ---
+                    st.experimental_rerun()
+
+# --- Tab Vote ---
 def tab_vote():
     st.header("🗳️ Bình chọn tham gia chơi")
     if st.session_state.user_role == 'admin':
@@ -333,7 +317,7 @@ def tab_vote():
                     })
                     save_all()
                     st.success("Tạo bình chọn thành công!")
-                    st.rerun()
+                    st.experimental_rerun()
 
     if st.session_state.user_role == 'member':
         if not st.session_state.votes:
@@ -353,7 +337,7 @@ def tab_vote():
                         vote['voters'].append(st.session_state.user_email)
                         save_all()
                         st.success(f"Bạn đã tham gia bình chọn ngày {date_str}")
-                        st.rerun()
+                        st.experimental_rerun()
 
     st.subheader("Thống kê số lượng vote tham gia")
     if not st.session_state.votes:
@@ -363,7 +347,7 @@ def tab_vote():
     df = pd.DataFrame(data).sort_values(by='Ngày', ascending=False)
     st.dataframe(df.style.bar(subset=['Số lượng tham gia'], color='#2196F3'))
 
-# --- Tab quản lý tài chính ---
+# --- Tab Quản lý tài chính ---
 def tab_finance():
     st.header("💰 Quản lý tài chính")
     users = st.session_state.users
@@ -378,7 +362,7 @@ def tab_finance():
             users[member_email]['balance'] += amount
             save_all()
             st.success("Cập nhật đóng góp thành công!")
-            st.rerun()
+            st.experimental_rerun()
 
     if st.session_state.user_role == 'admin':
         st.subheader("Nhập chi phí buổi tập")
@@ -401,7 +385,7 @@ def tab_finance():
                         st.session_state.expenses.append({'date': date_expense, 'amount': cost, 'participants': vote['voters']})
                         save_all()
                         st.success(f"Đã nhập chi phí và trừ tiền cho {len(vote['voters'])} thành viên.")
-                        st.rerun()
+                        st.experimental_rerun()
     else:
         st.info("Chức năng nhập chi phí buổi tập chỉ dành cho quản trị viên.")
 
@@ -422,87 +406,3 @@ def tab_finance():
         balance = users[email]['balance']
         sessions = attendance_count.get(email, 0)
         need_pay = sessions * avg_cost_per_session
-        data.append({
-            'Tên': name,
-            'Buổi tập': sessions,
-            'Số tiền cần đóng góp (VNĐ)': need_pay,
-            'Số tiền còn lại (VNĐ)': balance
-        })
-
-    df = pd.DataFrame(data)
-    st.dataframe(
-        df.style.format({
-            "Số tiền cần đóng góp (VNĐ)": "{:,.0f}",
-            "Số tiền còn lại (VNĐ)": "{:,.0f}"
-        }).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800')
-    )
-
-# --- Tab Home: biểu đồ thống kê ---
-def tab_home():
-    st.header("📊 Trang chủ - Thống kê tổng quan")
-
-    users = st.session_state.users
-    members = [u for u in users.values() if u['role']=='member' and u['approved']]
-    if not members:
-        st.info("Chưa có thành viên nào được phê duyệt.")
-        return
-
-    df = pd.DataFrame(members)
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("🏅 Top thành viên theo số trận thắng")
-        df_rank = df[['name', 'wins']].sort_values(by='wins', ascending=False).head(10)
-        st.bar_chart(df_rank.set_index('name'))
-
-    with col2:
-        st.subheader("💵 Top thành viên theo số tiền còn lại")
-        df_balance = df[['name', 'balance']].sort_values(by='balance', ascending=False).head(10)
-        st.bar_chart(df_balance.set_index('name'))
-
-    with col3:
-        st.subheader("🗳️ Số lần tham gia chơi")
-        vote_counts = {email:0 for email in users}
-        for vote in st.session_state.votes:
-            for v in vote['voters']:
-                vote_counts[v] = vote_counts.get(v, 0) + 1
-# --- Main app ---
-def main():
-    st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
-
-    st.sidebar.title("🏓 Menu")
-    if 'login' not in st.session_state or not st.session_state.login:
-        choice = st.sidebar.radio("Chọn chức năng", ["Đăng nhập", "Đăng ký"])
-        if choice == "Đăng nhập":
-            login()
-        else:
-            register()
-    else:
-        user = st.session_state.users[st.session_state.user_email]
-        st.sidebar.markdown(f"**Xin chào, {user['name']}** ({st.session_state.user_role})")
-        if st.sidebar.button("🚪 Đăng xuất"):
-            st.session_state.login = False
-            st.rerun()
-
-        tabs = ["Home", "Thành viên", "Ranking", "Vote", "Quản lý tài chính"]
-        if st.session_state.user_role == 'admin':
-            tabs.insert(1, "Phê duyệt thành viên")
-
-        choice = st.sidebar.radio("Chọn chức năng", tabs)
-
-        if choice == "Home":
-            tab_home()
-        elif choice == "Phê duyệt thành viên":
-            admin_approve_users()
-        elif choice == "Thành viên":
-            tab_members()
-        elif choice == "Ranking":
-            tab_ranking()
-        elif choice == "Vote":
-            tab_vote()
-        elif choice == "Quản lý tài chính":
-            tab_finance()
-
-if __name__ == "__main__":
-    main()
