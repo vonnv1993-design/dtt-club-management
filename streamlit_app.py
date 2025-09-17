@@ -453,11 +453,6 @@ def tab_home():
         else:
             st.info("Chưa có dữ liệu bình chọn tham gia.")
 
-# --- Tab Quản lý tài chính (mẫu) ---
-def tab_finance():
-    st.header("💰 Quản lý tài chính")
-    st.info("Chức năng quản lý tài chính đang được phát triển.")
-
 # --- Main app ---
 def main():
     st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
