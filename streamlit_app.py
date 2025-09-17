@@ -170,7 +170,6 @@ def tab_members():
 
     data = []
     for u in members:
-        # Tìm email tương ứng user
         email = None
         for e, user in users.items():
             if user == u:
@@ -406,3 +405,99 @@ def tab_finance():
         balance = users[email]['balance']
         sessions = attendance_count.get(email, 0)
         need_pay = sessions * avg_cost_per_session
+        data.append({
+            'Tên': name,
+            'Buổi tập': sessions,
+            'Số tiền cần đóng góp (VNĐ)': need_pay,
+            'Số tiền còn lại (VNĐ)': balance
+        })
+
+    df = pd.DataFrame(data)
+    st.dataframe(
+        df.style.format({
+            "Số tiền cần đóng góp (VNĐ)": "{:,.0f}",
+            "Số tiền còn lại (VNĐ)": "{:,.0f}"
+        }).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800')
+    )
+
+# --- Tab Home ---
+def tab_home():
+    st.header("📊 Trang chủ - Thống kê tổng quan")
+
+    users = st.session_state.users
+    members = [u for u in users.values() if u['role']=='member' and u['approved']]
+    if not members:
+        st.info("Chưa có thành viên nào được phê duyệt.")
+        return
+
+    df = pd.DataFrame(members)
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.subheader("🏅 Top thành viên theo số trận thắng")
+        df_rank = df[['name', 'wins']].sort_values(by='wins', ascending=False).head(10)
+        st.bar_chart(df_rank.set_index('name'))
+
+    with col2:
+        st.subheader("💵 Top thành viên theo số tiền còn lại")
+        df_balance = df[['name', 'balance']].sort_values(by='balance', ascending=False).head(10)
+        st.bar_chart(df_balance.set_index('name'))
+
+    with col3:
+        st.subheader("🗳️ Số lần tham gia chơi")
+        vote_counts = {email:0 for email in users}
+        for vote in st.session_state.votes:
+            for v in vote['voters']:
+                vote_counts[v] = vote_counts.get(v, 0) + 1
+        data = []
+        for email, count in vote_counts.items():
+            user = users.get(email)
+            if user and user['role']=='member' and user['approved']:
+                data.append({'name': user['name'], 'votes': count})
+        df_vote = pd.DataFrame(data)
+        if not df_vote.empty:
+            df_vote = df_vote.sort_values(by='votes', ascending=False).head(10)
+            st.bar_chart(df_vote.set_index('name'))
+        else:
+            st.info("Chưa có dữ liệu bình chọn tham gia.")
+
+# --- Main app ---
+def main():
+    st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
+
+    st.sidebar.title("🏓 Menu")
+    if 'login' not in st.session_state or not st.session_state.login:
+        choice = st.sidebar.radio("Chọn chức năng", ["Đăng nhập", "Đăng ký"])
+        if choice == "Đăng nhập":
+            login()
+        else:
+            register()
+    else:
+        user = st.session_state.users[st.session_state.user_email]
+        st.sidebar.markdown(f"**Xin chào, {user['name']}** ({st.session_state.user_role})")
+        if st.sidebar.button("🚪 Đăng xuất"):
+            st.session_state.login = False
+            st.experimental_rerun()
+
+        tabs = ["Home", "Thành viên", "Ranking", "Vote", "Quản lý tài chính"]
+        if st.session_state.user_role == 'admin':
+            tabs.insert(1, "Phê duyệt thành viên")
+
+        choice = st.sidebar.radio("Chọn chức năng", tabs)
+
+        if choice == "Home":
+            tab_home()
+        elif choice == "Phê duyệt thành viên":
+            admin_approve_users()
+        elif choice == "Thành viên":
+            tab_members()
+        elif choice == "Ranking":
+            tab_ranking()
+        elif choice == "Vote":
+            tab_vote()
+        elif choice == "Quản lý tài chính":
+            tab_finance()
+
+if __name__ == "__main__":
+    main()
