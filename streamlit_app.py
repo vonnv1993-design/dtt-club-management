@@ -1,289 +1,179 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
-from datetime import datetime
-import matplotlib.pyplot as plt
-from io import BytesIO
+import hashlib
+import os
 
-# --------------------------
-# Database utilities
-# --------------------------
-DB_FILE = "club.db"
+# ---------------------------
+# Helper functions
+# ---------------------------
 
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    # Users table
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT,
-            email TEXT UNIQUE,
-            phone TEXT,
-            password TEXT,
-            role TEXT,
-            approved INTEGER DEFAULT 0,
-            wins INTEGER DEFAULT 0
-        )
-    """)
-    # Matches (ranking wins)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS matches (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            result TEXT,
-            created_at TEXT
-        )
-    """)
-    # Votes
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS votes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date_play TEXT,
-            user_id INTEGER,
-            voted INTEGER,
-            created_at TEXT
-        )
-    """)
-    # Finance
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS finance (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            amount INTEGER,
-            type TEXT,
-            note TEXT,
-            created_at TEXT
-        )
-    """)
-    conn.commit()
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
-    # --- Migration: đảm bảo cột 'wins' tồn tại cho DB cũ ---
-    cur.execute("PRAGMA table_info(users)")
-    cols_info = cur.fetchall()
-    cols = [row[1] for row in cols_info]
-    if "wins" not in cols:
-        try:
-            cur.execute("ALTER TABLE users ADD COLUMN wins INTEGER DEFAULT 0")
-            conn.commit()
-            print("✅ Added 'wins' column to users table")
-        except Exception as e:
-            print("⚠️ Could not add 'wins' column:", e)
-
-    conn.close()
-
-
-def add_user(name, email, phone, password, role="member"):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO users (name, email, phone, password, role, approved, wins)
-        VALUES (?,?,?,?,?,?,?)
-    """, (name, email, phone, password, role, 0, 0))
-    conn.commit()
-    conn.close()
-
-def authenticate(email, password):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE email=? AND password=?", (email, password))
-    row = cur.fetchone()
-    conn.close()
-    return row
-
-def list_users(status_filter=None):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    if status_filter == "approved":
-        cur.execute("SELECT * FROM users WHERE approved=1")
-    elif status_filter == "pending":
-        cur.execute("SELECT * FROM users WHERE approved=0")
+def load_users():
+    if os.path.exists("users.csv"):
+        df = pd.read_csv("users.csv")
+        if "wins" not in df.columns:
+            df["wins"] = 0
+        return df
     else:
-        cur.execute("SELECT * FROM users")
-    rows = cur.fetchall()
-    conn.close()
-    return rows
+        return pd.DataFrame(columns=["id", "name", "email", "phone", "password", "approved", "is_admin", "wins"])
 
-def approve_user(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET approved=1 WHERE id=?", (user_id,))
-    conn.commit()
-    conn.close()
+def save_users(df):
+    df.to_csv("users.csv", index=False)
 
-def record_win(user_id):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET wins = wins + 1 WHERE id=?", (user_id,))
-    conn.commit()
-    conn.close()
+def load_votes():
+    if os.path.exists("votes.csv"):
+        return pd.read_csv("votes.csv")
+    else:
+        return pd.DataFrame(columns=["user_id", "candidate"])
 
-def record_vote(date_play, user_id, voted):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO votes (date_play, user_id, voted, created_at)
-        VALUES (?,?,?,?)
-    """, (date_play, user_id, voted, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
+def save_votes(df):
+    df.to_csv("votes.csv", index=False)
 
-def record_finance(user_id, amount, type_, note=""):
-    conn = sqlite3.connect(DB_FILE)
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO finance (user_id, amount, type, note, created_at)
-        VALUES (?,?,?,?,?)
-    """, (user_id, amount, type_, note, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
+# ---------------------------
+# Khởi tạo dữ liệu mặc định
+# ---------------------------
 
-# --------------------------
-# Streamlit App
-# --------------------------
-init_db()
-st.set_page_config(page_title="Pickleball Club Management", layout="wide")
+users_df = load_users()
 
+if users_df.empty:
+    users_df = pd.DataFrame([{
+        "id": 1,
+        "name": "Admin",
+        "email": "admin@example.com",
+        "phone": "0000000000",
+        "password": hash_password("admin123"),
+        "approved": True,
+        "is_admin": True,
+        "wins": 0
+    }])
+    save_users(users_df)
+
+# ---------------------------
+# UI
+# ---------------------------
+
+st.set_page_config(page_title="DTT Club Management", layout="wide")
+st.title("🏓 DTT Club Management System")
+
+# Session state
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 if "user" not in st.session_state:
-    st.session_state["user"] = None
+    st.session_state.user = None
 
-# --- Login / Register ---
-if st.session_state["user"] is None:
-    st.title("🏓 Pickleball Club Management")
+# ---------------------------
+# Tabs
+# ---------------------------
+tab_login, tab_register, tab_vote, tab_admin = st.tabs(["🔑 Đăng nhập", "📝 Đăng ký", "🗳️ Bình chọn", "⚙️ Quản trị"])
 
-    tab_login, tab_register = st.tabs(["Đăng nhập", "Đăng ký thành viên"])
+# ---------------------------
+# Đăng nhập
+# ---------------------------
+with tab_login:
+    st.subheader("Đăng nhập hệ thống")
 
-    with tab_login:
-        email = st.text_input("Email")
-        password = st.text_input("Mật khẩu", type="password")
-        if st.button("Đăng nhập"):
-            # Admin mặc định
-            if email == "admin" and password == "Admin@123":
-                st.session_state["user"] = {"id": 0, "name": "Admin", "role": "admin"}
-                st.experimental_rerun()
+    email = st.text_input("Email", key="login_email")
+    password = st.text_input("Mật khẩu", type="password", key="login_password")
+
+    if st.button("Đăng nhập", key="btn_login"):
+        users_df = load_users()
+        user = users_df[users_df["email"] == email]
+        if not user.empty and user.iloc[0]["password"] == hash_password(password):
+            if user.iloc[0]["approved"]:
+                st.session_state.logged_in = True
+                st.session_state.user = user.iloc[0].to_dict()
+                st.success(f"Chào mừng {st.session_state.user['name']} 👋")
             else:
-                row = authenticate(email, password)
-                if row:
-                    user = {
-                        "id": row[0], "name": row[1], "email": row[2],
-                        "phone": row[3], "password": row[4],
-                        "role": row[5], "approved": row[6], "wins": row[7]
-                    }
-                    if user["approved"] == 1:
-                        st.session_state["user"] = user
-                        st.experimental_rerun()
-                    else:
-                        st.error("Tài khoản chưa được phê duyệt.")
+                st.error("Tài khoản chưa được phê duyệt.")
+        else:
+            st.error("Email hoặc mật khẩu không đúng.")
+
+# ---------------------------
+# Đăng ký
+# ---------------------------
+with tab_register:
+    st.subheader("Đăng ký thành viên mới")
+
+    name = st.text_input("Tên", key="reg_name")
+    email = st.text_input("Email (unique)", key="reg_email")
+    phone = st.text_input("Số điện thoại", key="reg_phone")
+    password = st.text_input("Mật khẩu", type="password", key="reg_password")
+
+    if st.button("Đăng ký", key="btn_register"):
+        users_df = load_users()
+        if email in users_df["email"].values:
+            st.error("Email đã tồn tại.")
+        else:
+            new_id = users_df["id"].max() + 1 if not users_df.empty else 1
+            new_user = {
+                "id": new_id,
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "password": hash_password(password),
+                "approved": False,
+                "is_admin": False,
+                "wins": 0
+            }
+            users_df = pd.concat([users_df, pd.DataFrame([new_user])], ignore_index=True)
+            save_users(users_df)
+            st.success("Đăng ký thành công! Vui lòng chờ quản trị viên phê duyệt.")
+
+# ---------------------------
+# Bình chọn
+# ---------------------------
+with tab_vote:
+    st.subheader("Bình chọn cho thành viên xuất sắc")
+
+    if st.session_state.logged_in:
+        users_df = load_users()
+        candidates = users_df[users_df["approved"] & (~users_df["is_admin"])]
+        candidate_names = candidates["name"].tolist()
+
+        if candidate_names:
+            choice = st.selectbox("Chọn thành viên", candidate_names, key="vote_choice")
+            if st.button("Bình chọn", key="btn_vote"):
+                votes_df = load_votes()
+                if st.session_state.user["id"] in votes_df["user_id"].values:
+                    st.error("Bạn đã bình chọn rồi.")
                 else:
-                    st.error("Email hoặc mật khẩu không đúng.")
-
-    with tab_register:
-        name = st.text_input("Tên")
-        email = st.text_input("Email (unique)")
-        phone = st.text_input("Số điện thoại")
-        password = st.text_input("Mật khẩu", type="password")
-        if st.button("Đăng ký"):
-            try:
-                add_user(name, email, phone, password)
-                st.success("Đăng ký thành công! Vui lòng chờ quản trị viên phê duyệt.")
-            except Exception as e:
-                st.error(f"Lỗi: {e}")
-
-else:
-    user = st.session_state["user"]
-    st.sidebar.write(f"Xin chào, **{user['name']}**")
-    if st.sidebar.button("Đăng xuất"):
-        st.session_state["user"] = None
-        st.experimental_rerun()
-
-    # --- Tabs ---
-    tabs = ["Home", "Thành viên", "Ranking", "Vote", "Tài chính"]
-    choice = st.sidebar.radio("Menu", tabs)
-
-    # --- HOME ---
-    if choice == "Home":
-        st.header("📊 Dashboard")
-        # Ranking chart
-        conn = sqlite3.connect(DB_FILE)
-        df_users = pd.read_sql_query("SELECT name, wins FROM users WHERE approved=1", conn)
-        conn.close()
-        if not df_users.empty:
-            top_ranking = df_users.sort_values("wins", ascending=False).head(5)
-            fig, ax = plt.subplots()
-            ax.bar(top_ranking["name"], top_ranking["wins"])
-            ax.set_title("Top Ranking")
-            st.pyplot(fig)
+                    new_vote = {
+                        "user_id": st.session_state.user["id"],
+                        "candidate": choice
+                    }
+                    votes_df = pd.concat([votes_df, pd.DataFrame([new_vote])], ignore_index=True)
+                    save_votes(votes_df)
+                    st.success("Cảm ơn bạn đã bình chọn!")
         else:
-            st.info("Chưa có dữ liệu xếp hạng.")
+            st.info("Chưa có ứng viên để bình chọn.")
+    else:
+        st.warning("Vui lòng đăng nhập trước khi bình chọn.")
 
-    # --- MEMBERS ---
-    elif choice == "Thành viên":
-        st.header("👥 Quản lý thành viên")
-        if user["role"] == "admin":
-            pending = list_users(status_filter="pending")
-            if pending:
-                st.subheader("Chờ phê duyệt")
-                for row in pending:
-                    st.write(row)
-                    if st.button(f"Phê duyệt {row[1]}", key=f"approve{row[0]}"):
-                        approve_user(row[0])
-                        st.experimental_rerun()
-            else:
-                st.info("Không có thành viên chờ phê duyệt.")
-        approved = list_users(status_filter="approved")
-        st.subheader("Danh sách thành viên")
-        if approved:
-            users_df = pd.DataFrame(approved)
-            users_df.columns = ["id","name","email","phone","password","role","approved","wins"]
-            display_df = users_df[["id","name","email","phone","wins"]]
-            st.dataframe(display_df)
-        else:
-            st.info("Chưa có thành viên được phê duyệt.")
+# ---------------------------
+# Quản trị viên
+# ---------------------------
+with tab_admin:
+    st.subheader("Quản trị hệ thống")
 
-    # --- RANKING ---
-    elif choice == "Ranking":
-        st.header("🏆 Xếp hạng thành viên")
-        if user["role"] == "admin":
-            all_users = list_users(status_filter="approved")
-            for row in all_users:
-                if st.button(f"Thêm trận thắng cho {row[1]}", key=f"win{row[0]}"):
-                    record_win(row[0])
-                    st.experimental_rerun()
-        # Hiển thị ranking
-        users_rows = list_users(status_filter="approved")
-        if users_rows:
-            users_df = pd.DataFrame(users_rows)
-            users_df.columns = ["id","name","email","phone","password","role","approved","wins"]
-            display_df = users_df[["id","name","email","phone","wins"]].sort_values("wins", ascending=False)
-            st.dataframe(display_df)
-        else:
-            st.info("Chưa có thành viên được phê duyệt.")
+    if st.session_state.logged_in and st.session_state.user["is_admin"]:
+        st.write("Danh sách thành viên:")
 
-    # --- VOTE ---
-    elif choice == "Vote":
-        st.header("🗳️ Vote tham gia chơi")
-        if user["role"] == "admin":
-            date_play = st.date_input("Ngày tổ chức")
-            if st.button("Tạo bình chọn"):
-                st.success(f"Đã tạo bình chọn cho {date_play}")
-        # Thành viên vote
-        date_vote = st.date_input("Ngày bạn muốn vote")
-        if st.button("Vote tham gia"):
-            record_vote(date_vote.isoformat(), user["id"], 1)
-            st.success("Đã vote tham gia.")
+        users_df = load_users()
+        st.dataframe(users_df[["id", "name", "email", "phone", "approved", "is_admin", "wins"]])
 
-    # --- FINANCE ---
-    elif choice == "Tài chính":
-        st.header("💰 Quản lý tài chính")
-        if user["role"] == "admin":
-            st.subheader("Ghi nhận đóng góp")
-            member_id = st.number_input("User ID", min_value=1, step=1)
-            amount = st.number_input("Số tiền", min_value=0, step=1000)
-            if st.button("Ghi nhận"):
-                record_finance(member_id, amount, "contribute", "Đóng góp")
-                st.success("Đã ghi nhận.")
-        st.subheader("Lịch sử giao dịch")
-        conn = sqlite3.connect(DB_FILE)
-        df_fin = pd.read_sql_query("SELECT * FROM finance", conn)
-        conn.close()
-        st.dataframe(df_fin)
+        approve_id = st.number_input("Nhập ID để phê duyệt", min_value=1, step=1, key="approve_id")
+        if st.button("Phê duyệt", key="btn_approve"):
+            users_df.loc[users_df["id"] == approve_id, "approved"] = True
+            save_users(users_df)
+            st.success(f"Đã phê duyệt user ID {approve_id}")
+
+        win_id = st.number_input("Nhập ID để cộng 1 chiến thắng", min_value=1, step=1, key="win_id")
+        if st.button("Cộng 1 thắng", key="btn_add_win"):
+            users_df.loc[users_df["id"] == win_id, "wins"] += 1
+            save_users(users_df)
+            st.success(f"Đã cộng 1 trận thắng cho user ID {win_id}")
+
+    else:
+        st.warning("Chỉ quản trị viên mới được truy cập.")
