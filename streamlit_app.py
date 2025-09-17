@@ -412,7 +412,6 @@ def tab_home():
         else:
             st.info("Chưa có dữ liệu bình chọn tham gia.")
 # --- Tab quản lý tài chính ---
-@st.cache_data  # Cache dữ liệu tĩnh để tối ưu hiệu suất trên cloud
 def tab_finance():
     st.header("💰 Quản lý tài chính")
     users = st.session_state.users
