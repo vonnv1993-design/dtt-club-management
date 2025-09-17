@@ -499,9 +499,147 @@ def tab_finance():
             "Số tiền còn lại (VNĐ)": "{:,.0f}"
         }).bar(subset=['Số tiền còn lại (VNĐ)'], color='#FF9800')
     )
-# --- Main app ---
+# --- Hàm load dữ liệu mẫu ---
+def load_sample_data():
+    # Dữ liệu mẫu thành viên
+    sample_users = {
+        "member1@example.com": {
+            "name": "Nguyễn Văn A",
+            "phone": "0123456789",
+            "password_hash": hash_password("password1"),
+            "role": "member",
+            "approved": True,
+            "wins": 15,
+            "balance": 50000,
+            "total_contributed": 100000,
+            "total_session_cost": 30000
+        },
+        "member2@example.com": {
+            "name": "Trần Thị B",
+            "phone": "0987654321",
+            "password_hash": hash_password("password2"),
+            "role": "member",
+            "approved": True,
+            "wins": 20,
+            "balance": 30000,
+            "total_contributed": 80000,
+            "total_session_cost": 25000
+        },
+        "member3@example.com": {
+            "name": "Lê Văn C",
+            "phone": "0111111111",
+            "password_hash": hash_password("password3"),
+            "role": "member",
+            "approved": True,
+            "wins": 10,
+            "balance": 70000,
+            "total_contributed": 120000,
+            "total_session_cost": 20000
+        },
+        "member4@example.com": {
+            "name": "Phạm Thị D",
+            "phone": "0222222222",
+            "password_hash": hash_password("password4"),
+            "role": "member",
+            "approved": True,
+            "wins": 25,
+            "balance": 20000,
+            "total_contributed": 90000,
+            "total_session_cost": 35000
+        },
+        "member5@example.com": {
+            "name": "Hoàng Văn E",
+            "phone": "0333333333",
+            "password_hash": hash_password("password5"),
+            "role": "member",
+            "approved": True,
+            "wins": 5,
+            "balance": 60000,
+            "total_contributed": 70000,
+            "total_session_cost": 15000
+        }
+    }
+    st.session_state.users.update(sample_users)
+
+    # Dữ liệu mẫu votes (bình chọn)
+    sample_votes = [
+        {
+            "date": "2023-10-01",
+            "weekday": "Thứ Hai",
+            "description": "Buổi tập kỹ thuật",
+            "voters": ["member1@example.com", "member2@example.com", "member3@example.com"]
+        },
+        {
+            "date": "2023-10-08",
+            "weekday": "Thứ Hai",
+            "description": "Buổi giao hữu",
+            "voters": ["member1@example.com", "member4@example.com", "member5@example.com"]
+        },
+        {
+            "date": "2023-10-15",
+            "weekday": "Thứ Hai",
+            "description": "Buổi tập nâng cao",
+            "voters": ["member2@example.com", "member3@example.com", "member4@example.com"]
+        }
+    ]
+    st.session_state.votes.extend(sample_votes)
+
+    # Dữ liệu mẫu expenses (chi phí buổi tập)
+    sample_expenses = [
+        {
+            "date": "2023-10-01",
+            "amount": 30000,
+            "participants": ["member1@example.com", "member2@example.com", "member3@example.com"]
+        },
+        {
+            "date": "2023-10-08",
+            "amount": 25000,
+            "participants": ["member1@example.com", "member4@example.com", "member5@example.com"]
+        },
+        {
+            "date": "2023-10-15",
+            "amount": 40000,
+            "participants": ["member2@example.com", "member3@example.com", "member4@example.com"]
+        }
+    ]
+    st.session_state.expenses.extend(sample_expenses)
+
+    # Dữ liệu mẫu matches (chi tiết trận thắng cho ranking)
+    sample_matches = [
+        {
+            "player_email": "member1@example.com",
+            "date": "2023-10-02",
+            "location": "Sân A",
+            "score": "21:15",
+            "min_wins": 3
+        },
+        {
+            "player_email": "member2@example.com",
+            "date": "2023-10-03",
+            "location": "Sân B",
+            "score": "21:18",
+            "min_wins": 4
+        },
+        {
+            "player_email": "member4@example.com",
+            "date": "2023-10-04",
+            "location": "Sân C",
+            "score": "21:12",
+            "min_wins": 5
+        }
+    ]
+    st.session_state.matches.extend(sample_matches)
+
+    save_all()
+    st.success("Đã load dữ liệu mẫu thành công!")
+
+# --- Cập nhật main() để load dữ liệu mẫu nếu chưa có ---
 def main():
     st.set_page_config(page_title="Quản lý CLB Pickleball Ban CĐSCN", layout="wide", page_icon="🏓")
+
+    # Load dữ liệu mẫu nếu chưa có thành viên
+    if not any(u['role'] == 'member' for u in st.session_state.users.values()):
+        load_sample_data()
 
     st.sidebar.title("🏓 Menu")
     if 'login' not in st.session_state or not st.session_state.login:
