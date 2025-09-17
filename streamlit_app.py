@@ -143,6 +143,15 @@ st.markdown("""
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
     }
     
+    .expense-card {
+        background: #fff8e1;
+        border: 1px solid #ffcc02;
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid #ff9800;
+    }
+    
     .progress-bar {
         background-color: #e9ecef;
         border-radius: 10px;
@@ -196,7 +205,7 @@ def init_database():
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
-    # Users table (for authentication)
+    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,7 +258,7 @@ def init_database():
         )
     ''')
     
-    # Finances table
+    # Finances table - CẢI TIẾN ĐỂ LIÊN KẾT VỚI BUỔI TẬP
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS finances (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -261,6 +270,7 @@ def init_database():
             court_fee INTEGER DEFAULT 0,
             water_fee INTEGER DEFAULT 0,
             other_fee INTEGER DEFAULT 0,
+            total_participants INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
@@ -319,7 +329,7 @@ def login_user(email, password):
             return False, "Tài khoản chưa được phê duyệt!"
     return False, "Email hoặc mật khẩu không đúng!"
 
-# Database helper functions - KHÔNG BAO GỒM ADMIN
+# Database helper functions
 def get_pending_members():
     conn = sqlite3.connect('pickleball_club.db')
     df = pd.read_sql_query('''
@@ -381,12 +391,10 @@ def add_ranking(user_name, wins, match_date, location, score):
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
-    # Get user_id (chỉ thành viên, không phải admin)
     cursor.execute('SELECT id FROM users WHERE full_name = ? AND is_approved = 1 AND is_admin = 0', (user_name,))
     user = cursor.fetchone()
     
     if user:
-        # Add multiple ranking entries for wins
         for _ in range(wins):
             cursor.execute('''
                 INSERT INTO rankings (user_id, wins, match_date, location, score)
@@ -426,7 +434,6 @@ def vote_for_session(user_id, session_date):
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
-    # Check if already voted
     cursor.execute('''
         SELECT id FROM votes WHERE user_id = ? AND vote_date = ?
     ''', (user_id, session_date))
@@ -471,32 +478,54 @@ def add_contribution(user_name, amount):
     conn.commit()
     conn.close()
 
+def get_vote_sessions_for_expense():
+    """Lấy danh sách các buổi đã có vote để chọn khi thêm chi phí"""
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT DISTINCT vs.session_date, vs.description, COUNT(v.id) as vote_count
+        FROM vote_sessions vs
+        LEFT JOIN votes v ON vs.session_date = v.vote_date
+        LEFT JOIN users u ON v.user_id = u.id AND u.is_admin = 0
+        GROUP BY vs.session_date, vs.description
+        HAVING vote_count > 0
+        ORDER BY vs.session_date DESC
+    ''', conn)
+    conn.close()
+    return df
+
 def add_expense(session_date, court_fee, water_fee, other_fee, description):
+    """Thêm chi phí cho buổi tập và chia đều cho các thành viên đã vote"""
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
     total_fee = court_fee + water_fee + other_fee
     
-    # Get voters for this session (chỉ thành viên, không phải admin)
+    # Lấy danh sách thành viên đã vote cho buổi này (chỉ thành viên, không bao gồm admin)
     cursor.execute('''
-        SELECT v.user_id FROM votes v
+        SELECT v.user_id, u.full_name FROM votes v
         JOIN users u ON v.user_id = u.id
         WHERE v.vote_date = ? AND u.is_admin = 0
     ''', (session_date,))
     voters = cursor.fetchall()
     
     if voters:
-        cost_per_person = total_fee // len(voters)
+        cost_per_person = total_fee // len(voters)  # Chi phí mỗi người
         
+        # Thêm chi phí cho từng thành viên đã vote
         for voter in voters:
             cursor.execute('''
-                INSERT INTO finances (user_id, amount, transaction_type, description, session_date, court_fee, water_fee, other_fee)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO finances (user_id, amount, transaction_type, description, session_date, 
+                                    court_fee, water_fee, other_fee, total_participants)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (voter[0], -cost_per_person, 'expense', description, session_date, 
-                  court_fee//len(voters), water_fee//len(voters), other_fee//len(voters)))
-    
-    conn.commit()
-    conn.close()
+                  court_fee//len(voters), water_fee//len(voters), other_fee//len(voters), len(voters)))
+        
+        conn.commit()
+        conn.close()
+        return True, f"Đã chia {total_fee:,} VNĐ cho {len(voters)} thành viên ({cost_per_person:,} VNĐ/người)"
+    else:
+        conn.close()
+        return False, "Không có thành viên nào vote cho buổi này"
 
 def get_financial_summary():
     conn = sqlite3.connect('pickleball_club.db')
@@ -515,10 +544,31 @@ def get_financial_summary():
     conn.close()
     return df
 
+def get_expense_history():
+    """Lấy lịch sử chi phí theo từng buổi tập"""
+    conn = sqlite3.connect('pickleball_club.db')
+    df = pd.read_sql_query('''
+        SELECT 
+            f.session_date,
+            vs.description as session_description,
+            MAX(f.court_fee * f.total_participants) as total_court_fee,
+            MAX(f.water_fee * f.total_participants) as total_water_fee,  
+            MAX(f.other_fee * f.total_participants) as total_other_fee,
+            MAX(f.total_participants) as participants_count,
+            MAX(f.court_fee + f.water_fee + f.other_fee) as cost_per_person,
+            f.created_at
+        FROM finances f
+        LEFT JOIN vote_sessions vs ON f.session_date = vs.session_date
+        WHERE f.transaction_type = 'expense'
+        GROUP BY f.session_date, vs.description, f.created_at
+        ORDER BY f.session_date DESC, f.created_at DESC
+    ''', conn)
+    conn.close()
+    return df
+
 def get_alerts():
     alerts = []
     
-    # Check low balance alert (chỉ thành viên)
     conn = sqlite3.connect('pickleball_club.db')
     cursor = conn.cursor()
     
@@ -535,7 +585,6 @@ def get_alerts():
     for user in low_balance_users:
         alerts.append(f"⚠️ {user[0]} có số dư thấp: {user[1]:,} VNĐ")
     
-    # Check low voting activity (chỉ thành viên)
     thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     cursor.execute('''
         SELECT u.full_name, COUNT(v.id) as vote_count
@@ -553,7 +602,7 @@ def get_alerts():
     conn.close()
     return alerts
 
-# Custom chart functions using HTML/CSS
+# Custom chart functions
 def create_horizontal_bar_chart(data, title):
     if data.empty:
         return f"<p>Chưa có dữ liệu cho {title}</p>"
@@ -622,7 +671,6 @@ if 'current_page' not in st.session_state:
 
 # Main app
 def main():
-    # Header
     st.markdown("""
         <div class="main-header">
             <h1>🏓 DTT PICKLEBALL CLUB</h1>
@@ -630,7 +678,6 @@ def main():
         </div>
     """, unsafe_allow_html=True)
     
-    # Authentication
     if not st.session_state.logged_in:
         show_auth_page()
     else:
@@ -658,7 +705,7 @@ def show_auth_page():
                 else:
                     st.error("Vui lòng nhập đầy đủ thông tin!")
         
-        st.info("💡 Cần trợ giúp xin liên hệ Vonnv")
+        st.info("💡 Tài khoản admin mặc định: admin@local / Admin@123")
     
     with tab2:
         st.subheader("Đăng ký thành viên mới")
@@ -685,7 +732,6 @@ def show_auth_page():
                     st.error("Vui lòng nhập đầy đủ thông tin!")
 
 def show_main_app():
-    # User info and navigation
     user_role = "👑 Quản trị viên" if st.session_state.user['is_admin'] else "👤 Thành viên"
     
     st.markdown(f"""
@@ -695,10 +741,8 @@ def show_main_app():
         </div>
     """, unsafe_allow_html=True)
     
-    # Navigation menu
     show_navigation_menu()
     
-    # Main content based on selected page
     if st.session_state.current_page == "🏠 Trang chủ":
         show_home_page()
     elif st.session_state.current_page == "✅ Phê duyệt thành viên":
@@ -715,16 +759,14 @@ def show_main_app():
         show_alerts_page()
 
 def show_navigation_menu():
-    # Define menu items based on user role
     menu_items = ["🏠 Trang chủ", "👥 Danh sách thành viên", "🏆 Xếp hạng", "🗳️ Bình chọn", "💰 Tài chính", "⚠️ Cảnh báo"]
     
     if st.session_state.user['is_admin']:
         menu_items.insert(1, "✅ Phê duyệt thành viên")
     
-    # Create navigation menu
     st.markdown('<div class="nav-menu">', unsafe_allow_html=True)
     
-    cols = st.columns(len(menu_items) + 1)  # +1 for logout button
+    cols = st.columns(len(menu_items) + 1)
     
     for i, item in enumerate(menu_items):
         with cols[i]:
@@ -732,7 +774,6 @@ def show_navigation_menu():
                 st.session_state.current_page = item
                 st.rerun()
     
-    # Logout button in the last column
     with cols[-1]:
         if st.button("🚪 Đăng xuất", key="logout", use_container_width=True, type="primary"):
             st.session_state.logged_in = False
@@ -745,7 +786,6 @@ def show_navigation_menu():
 def show_home_page():
     st.title("📊 Trang chủ - Tổng quan")
     
-    # Statistics (chỉ thành viên, không tính admin)
     members_df = get_approved_members()
     rankings_df = get_rankings()
     financial_df = get_financial_summary()
@@ -778,7 +818,6 @@ def show_home_page():
             </div>
         """, unsafe_allow_html=True)
     
-    # Charts using custom HTML/CSS
     col1, col2 = st.columns(2)
     
     with col1:
@@ -790,7 +829,6 @@ def show_home_page():
     
     with col2:
         if not financial_df.empty and financial_df['total_contribution'].sum() > 0:
-            # Show top contributors
             contrib_data = financial_df[financial_df['total_contribution'] > 0].head(5)
             if not contrib_data.empty:
                 chart_html = create_horizontal_bar_chart(
@@ -803,7 +841,6 @@ def show_home_page():
         else:
             st.info("Chưa có dữ liệu tài chính")
     
-    # Recent activities (chỉ thành viên)
     st.subheader("📈 Hoạt động gần đây")
     
     conn = sqlite3.connect('pickleball_club.db')
@@ -891,13 +928,11 @@ def show_members_page():
         st.subheader(f"📊 Tổng số: {len(members_df)} thành viên")
         st.caption("*Không bao gồm quản trị viên trong danh sách")
         
-        # Add search functionality
         search_term = st.text_input("🔍 Tìm kiếm thành viên", placeholder="Nhập tên để tìm kiếm...")
         
         if search_term:
             members_df = members_df[members_df['full_name'].str.contains(search_term, case=False, na=False)]
         
-        # Display members in table
         if not members_df.empty:
             display_df = members_df.copy()
             display_df['birth_date'] = pd.to_datetime(display_df['birth_date']).dt.strftime('%d/%m/%Y')
@@ -919,7 +954,6 @@ def show_ranking_page():
     
     rankings_df = get_rankings()
     
-    # Admin functions
     if st.session_state.user['is_admin']:
         with st.expander("➕ Thêm kết quả trận đấu"):
             with st.form("add_ranking_form"):
@@ -947,14 +981,12 @@ def show_ranking_page():
                     else:
                         st.error("Vui lòng nhập đầy đủ thông tin!")
     
-    # Display rankings
     if rankings_df.empty:
         st.info("Chưa có dữ liệu xếp hạng")
     else:
         st.subheader("📈 Bảng xếp hạng")
         st.caption("*Chỉ thống kê thành viên, không bao gồm quản trị viên")
         
-        # Create ranking cards
         for idx, (_, player) in enumerate(rankings_df.iterrows(), 1):
             medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else "🏅"
             
@@ -965,7 +997,6 @@ def show_ranking_page():
                 </div>
             """, unsafe_allow_html=True)
         
-        # Chart using custom HTML
         if len(rankings_df) > 1:
             chart_html = create_horizontal_bar_chart(rankings_df.head(10), "📊 Top 10 thành viên xuất sắc")
             st.markdown(chart_html, unsafe_allow_html=True)
@@ -973,7 +1004,6 @@ def show_ranking_page():
 def show_voting_page():
     st.title("🗳️ Bình chọn tham gia")
     
-    # Admin create vote session
     if st.session_state.user['is_admin']:
         with st.expander("➕ Tạo phiên bình chọn mới"):
             with st.form("create_vote_form"):
@@ -993,7 +1023,6 @@ def show_voting_page():
                     else:
                         st.error("Vui lòng nhập mô tả!")
     
-    # Display vote sessions
     vote_sessions = get_vote_sessions()
     
     if vote_sessions.empty:
@@ -1018,7 +1047,6 @@ def show_voting_page():
                     """, unsafe_allow_html=True)
                 
                 with col2:
-                    # Chỉ thành viên mới có thể vote
                     if not st.session_state.user['is_admin']:
                         if st.button("🗳️ Vote", key=f"vote_{session['id']}", use_container_width=True):
                             success = vote_for_session(st.session_state.user['id'], session['session_date'])
@@ -1050,7 +1078,6 @@ def show_voting_page():
 def show_finance_page():
     st.title("💰 Quản lý tài chính")
     
-    # Admin functions
     if st.session_state.user['is_admin']:
         col1, col2 = st.columns(2)
         
@@ -1070,36 +1097,86 @@ def show_finance_page():
                         st.warning("Chưa có thành viên nào được phê duyệt")
         
         with col2:
-            with st.expander("➕ Thêm chi phí"):
-                with st.form("add_expense_form"):
-                    expense_date = st.date_input("📅 Ngày chi")
-                    court_fee = st.number_input("🏸 Tiền sân (VNĐ)", min_value=0, step=10000)
-                    water_fee = st.number_input("💧 Tiền nước (VNĐ)", min_value=0, step=5000)
-                    other_fee = st.number_input("➕ Chi phí khác (VNĐ)", min_value=0, step=5000)
-                    description = st.text_input("📝 Ghi chú", placeholder="Mô tả chi phí")
-                    
-                    total = court_fee + water_fee + other_fee
-                    if total > 0:
-                        st.info(f"💰 Tổng chi phí: {total:,} VNĐ")
-                    
-                    if st.form_submit_button("💾 Lưu", use_container_width=True):
+            with st.expander("➕ Thêm chi phí buổi tập"):
+                # Lấy danh sách các buổi đã có vote
+                vote_sessions_df = get_vote_sessions_for_expense()
+                
+                if not vote_sessions_df.empty:
+                    with st.form("add_expense_form"):
+                        # Chọn buổi tập
+                        session_options = []
+                        for _, row in vote_sessions_df.iterrows():
+                            date_str = pd.to_datetime(row['session_date']).strftime('%d/%m/%Y')
+                            session_options.append(f"{date_str} - {row['description']} ({row['vote_count']} thành viên)")
+                        
+                        selected_session_idx = st.selectbox("📅 Chọn buổi tập", range(len(session_options)), 
+                                                           format_func=lambda x: session_options[x])
+                        selected_session = vote_sessions_df.iloc[selected_session_idx]
+                        
+                        st.info(f"💡 Chi phí sẽ được chia đều cho {selected_session['vote_count']} thành viên đã vote")
+                        
+                        # Nhập chi phí
+                        court_fee = st.number_input("🏸 Tiền sân (VNĐ)", min_value=0, step=10000, value=200000)
+                        water_fee = st.number_input("💧 Tiền nước (VNĐ)", min_value=0, step=5000, value=50000)
+                        other_fee = st.number_input("➕ Chi phí khác (VNĐ)", min_value=0, step=5000, value=0)
+                        description = st.text_input("📝 Ghi chú", placeholder="Mô tả chi phí", value="Chi phí buổi tập")
+                        
+                        total = court_fee + water_fee + other_fee
                         if total > 0:
-                            add_expense(expense_date, court_fee, water_fee, other_fee, description)
-                            st.success(f"Đã thêm chi phí {total:,} VNĐ")
-                            st.rerun()
-                        else:
-                            st.error("Tổng chi phí phải lớn hơn 0!")
+                            cost_per_person = total // selected_session['vote_count']
+                            st.success(f"💰 Tổng chi phí: {total:,} VNĐ | Mỗi người: {cost_per_person:,} VNĐ")
+                        
+                        if st.form_submit_button("💾 Lưu chi phí", use_container_width=True):
+                            if total > 0:
+                                success, message = add_expense(selected_session['session_date'], court_fee, water_fee, other_fee, description)
+                                if success:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.error("Tổng chi phí phải lớn hơn 0!")
+                else:
+                    st.warning("Chưa có buổi tập nào có thành viên vote. Vui lòng tạo phiên bình chọn trước!")
     
-    # Financial summary
+    # Lịch sử chi phí
+    st.subheader("📋 Lịch sử chi phí các buổi tập")
+    expense_history = get_expense_history()
+    
+    if not expense_history.empty:
+        for _, expense in expense_history.iterrows():
+            expense_date = pd.to_datetime(expense['session_date']).strftime('%d/%m/%Y')
+            total_cost = expense['total_court_fee'] + expense['total_water_fee'] + expense['total_other_fee']
+            
+            st.markdown(f"""
+                <div class="expense-card">
+                    <h4>📅 {expense_date} - {expense['session_description']}</h4>
+                    <div style="display: flex; justify-content: space-between; margin: 10px 0;">
+                        <div>
+                            <strong>🏸 Tiền sân:</strong> {expense['total_court_fee']:,} VNĐ<br>
+                            <strong>💧 Tiền nước:</strong> {expense['total_water_fee']:,} VNĐ<br>
+                            <strong>➕ Chi phí khác:</strong> {expense['total_other_fee']:,} VNĐ
+                        </div>
+                        <div style="text-align: right;">
+                            <strong>👥 Số người tham gia:</strong> {expense['participants_count']}<br>
+                            <strong>💰 Tổng chi phí:</strong> {total_cost:,} VNĐ<br>
+                            <strong>👤 Chi phí/người:</strong> {expense['cost_per_person']:,} VNĐ
+                        </div>
+                    </div>
+                </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.info("Chưa có chi phí nào được ghi nhận")
+    
+    # Tổng quan tài chính
     financial_df = get_financial_summary()
     
     if financial_df.empty:
         st.info("Chưa có dữ liệu tài chính")
     else:
-        st.subheader("📊 Tổng quan tài chính")
+        st.subheader("📊 Tổng quan tài chính thành viên")
         st.caption("*Chỉ thống kê tài chính của thành viên, không bao gồm quản trị viên")
         
-        # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -1116,10 +1193,9 @@ def show_finance_page():
         
         with col4:
             avg_sessions = financial_df['sessions_attended'].mean()
-            st.metric("📊 TB buổi tập", f"{avg_sessions:.1f}")
+            st.metric("📊 TB buổi tham gia", f"{avg_sessions:.1f}")
         
-        # Detailed table
-        st.subheader("📋 Chi tiết tài chính thành viên")
+        st.subheader("📋 Chi tiết tài chính từng thành viên")
         
         display_df = financial_df.copy()
         display_df['total_contribution'] = display_df['total_contribution'].apply(lambda x: f"{x:,} VNĐ")
@@ -1130,15 +1206,14 @@ def show_finance_page():
         st.dataframe(
             display_df.rename(columns={
                 'full_name': 'Tên thành viên',
-                'total_contribution': 'Đã đóng',
-                'sessions_attended': 'Số buổi',
-                'total_expenses': 'Chi phí',
+                'total_contribution': 'Đã đóng góp',
+                'sessions_attended': 'Buổi tham gia',
+                'total_expenses': 'Tổng chi phí',
                 'balance': 'Số dư'
             }),
             use_container_width=True
         )
         
-        # Charts using custom HTML
         col1, col2 = st.columns(2)
         
         with col1:
@@ -1146,7 +1221,6 @@ def show_finance_page():
             st.markdown(chart_html, unsafe_allow_html=True)
         
         with col2:
-            # Top contributors chart
             contrib_data = financial_df[financial_df['total_contribution'] > 0].head(5)
             if not contrib_data.empty:
                 chart_html = create_horizontal_bar_chart(
@@ -1183,7 +1257,6 @@ def show_alerts_page():
                     </div>
                 """, unsafe_allow_html=True)
     
-    # System statistics
     st.subheader("📊 Thống kê hệ thống")
     
     conn = sqlite3.connect('pickleball_club.db')
@@ -1212,7 +1285,6 @@ def show_alerts_page():
     
     conn.close()
     
-    # Quick actions for admins
     if st.session_state.user['is_admin']:
         st.subheader("🔧 Thao tác nhanh")
         
