@@ -341,7 +341,7 @@ with st.sidebar:
 
 # If not logged in, show minimal info and return
 if st.session_state.auth_user is None:
-    st.info("Vui lòng đăng nhập hoặc đăng ký để sử dụng ứng dụng. (Admin mặc định: admin@local / Admin@123)")
+    st.info("Vui lòng đăng nhập hoặc đăng ký để sử dụng ứng dụng.")
     st.stop()
 
 # load fresh user info from DB
