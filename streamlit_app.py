@@ -128,21 +128,12 @@ st.markdown("""
         border-left: 4px solid #ff9800;
     }
     
-    .progress-bar {
-        background-color: #e9ecef;
+    .simple-chart {
+        background: white;
+        padding: 20px;
         border-radius: 10px;
-        overflow: hidden;
-        margin: 5px 0;
-    }
-    
-    .progress-fill {
-        height: 25px;
-        border-radius: 10px;
-        text-align: center;
-        line-height: 25px;
-        color: white;
-        font-weight: bold;
-        font-size: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        margin: 15px 0;
     }
     
     @media (max-width: 768px) {
@@ -160,7 +151,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Database file path - SỬ DỤNG ĐƯỜNG DẪN CỐ ĐỊNH
+# Database file path
 DB_FILE = "pickleball_club.db"
 
 # Database initialization
@@ -660,62 +651,6 @@ def get_alerts():
     
     return alerts
 
-# Custom chart functions
-def create_horizontal_bar_chart(data, title):
-    if data.empty:
-        return f"<p>Chưa có dữ liệu cho {title}</p>"
-    
-    max_value = data.iloc[:, 1].max() if len(data) > 0 else 1
-    
-    chart_html = f"<h4>{title}</h4>"
-    for _, row in data.head(5).iterrows():
-        name = row.iloc[0]
-        value = row.iloc[1]
-        percentage = (value / max_value) * 100 if max_value > 0 else 0
-        
-        chart_html += f"""
-        <div style="margin: 10px 0;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                <span><strong>{name}</strong></span>
-                <span>{value}</span>
-            </div>
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: {percentage}%; background: linear-gradient(90deg, #1f4e79, #2d5a87);">
-                    {percentage:.1f}%
-                </div>
-            </div>
-        </div>
-        """
-    return chart_html
-
-def create_balance_chart(data):
-    if data.empty:
-        return "<p>Chưa có dữ liệu tài chính</p>"
-    
-    max_abs = max(abs(data['balance'].min()), abs(data['balance'].max())) if len(data) > 0 else 1
-    
-    chart_html = "<h4>📊 Số dư thành viên</h4>"
-    for _, row in data.iterrows():
-        name = row['full_name']
-        balance = row['balance']
-        percentage = abs(balance) / max_abs * 100 if max_abs > 0 else 0
-        color = "#28a745" if balance >= 0 else "#dc3545"
-        
-        chart_html += f"""
-        <div style="margin: 10px 0;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                <span><strong>{name}</strong></span>
-                <span style="color: {color};">{balance:,} VNĐ</span>
-            </div>
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: {percentage}%; background: {color};">
-                    {percentage:.1f}%
-                </div>
-            </div>
-        </div>
-        """
-    return chart_html
-
 # THÊM HÀM TẠO DỮ LIỆU MẪU
 def create_sample_data():
     """Tạo dữ liệu mẫu để test"""
@@ -809,7 +744,7 @@ def show_auth_page():
                 else:
                     st.error("Vui lòng nhập đầy đủ thông tin!")
         
-        st.info("💡 Liên hệ vonnv để được trợ giúp")
+        st.info("💡 Cần hỗ trợ liên hệ vonnv")
     
     with tab2:
         st.subheader("Đăng ký thành viên mới")
@@ -923,29 +858,42 @@ def show_home_page():
             </div>
         """, unsafe_allow_html=True)
     
-    # Charts
+    # BIỂU ĐỒ SỬ DỤNG STREAMLIT NATIVE
     col1, col2 = st.columns(2)
     
     with col1:
+        st.markdown('<div class="simple-chart">', unsafe_allow_html=True)
+        st.subheader("🏆 Top 5 thành viên xuất sắc")
         if not rankings_df.empty:
-            chart_html = create_horizontal_bar_chart(rankings_df, "🏆 Top 5 thành viên xuất sắc")
-            st.markdown(chart_html, unsafe_allow_html=True)
+            # Tạo DataFrame cho bar chart
+            top_5 = rankings_df.head(5)
+            chart_data = pd.DataFrame({
+                'Thành viên': top_5['full_name'],
+                'Trận thắng': top_5['total_wins']
+            }).set_index('Thành viên')
+            
+            st.bar_chart(chart_data, height=300)
         else:
             st.info("Chưa có dữ liệu ranking")
+        st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
+        st.markdown('<div class="simple-chart">', unsafe_allow_html=True)
+        st.subheader("💰 Top 5 thành viên đóng góp nhiều")
         if not financial_df.empty and financial_df['total_contribution'].sum() > 0:
             contrib_data = financial_df[financial_df['total_contribution'] > 0].head(5)
             if not contrib_data.empty:
-                chart_html = create_horizontal_bar_chart(
-                    contrib_data[['full_name', 'total_contribution']], 
-                    "💰 Top 5 thành viên đóng góp nhiều"
-                )
-                st.markdown(chart_html, unsafe_allow_html=True)
+                chart_data = pd.DataFrame({
+                    'Thành viên': contrib_data['full_name'],
+                    'Đóng góp (VNĐ)': contrib_data['total_contribution']
+                }).set_index('Thành viên')
+                
+                st.bar_chart(chart_data, height=300)
             else:
                 st.info("Chưa có đóng góp nào")
         else:
             st.info("Chưa có dữ liệu tài chính")
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # Database info
     st.subheader("📊 Thông tin hệ thống")
@@ -1091,6 +1039,7 @@ def show_ranking_page():
     else:
         st.subheader("📈 Bảng xếp hạng")
         
+        # Hiển thị ranking cards
         for idx, (_, player) in enumerate(rankings_df.iterrows(), 1):
             medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else "🏅"
             
@@ -1101,10 +1050,11 @@ def show_ranking_page():
                 </div>
             """, unsafe_allow_html=True)
         
-        # Chart
+        # BIỂU ĐỒ STREAMLIT NATIVE
         if len(rankings_df) > 1:
-            chart_html = create_horizontal_bar_chart(rankings_df.head(10), "📊 Top 10 thành viên xuất sắc")
-            st.markdown(chart_html, unsafe_allow_html=True)
+            st.subheader("📊 Biểu đồ xếp hạng")
+            chart_data = rankings_df.head(10).set_index('full_name')
+            st.bar_chart(chart_data['total_wins'], height=400)
 
 def show_voting_page():
     st.title("🗳️ Bình chọn tham gia")
@@ -1299,21 +1249,23 @@ def show_finance_page():
             use_container_width=True
         )
         
-        # Charts
+        # BIỂU ĐỒ STREAMLIT NATIVE
         col1, col2 = st.columns(2)
         
         with col1:
-            chart_html = create_balance_chart(financial_df)
-            st.markdown(chart_html, unsafe_allow_html=True)
+            st.subheader("📊 Số dư thành viên")
+            if len(financial_df) > 0:
+                balance_chart = financial_df.set_index('full_name')['balance']
+                st.bar_chart(balance_chart, height=300)
+            else:
+                st.info("Chưa có dữ liệu")
         
         with col2:
+            st.subheader("💰 Top đóng góp")
             contrib_data = financial_df[financial_df['total_contribution'] > 0].head(5)
             if not contrib_data.empty:
-                chart_html = create_horizontal_bar_chart(
-                    contrib_data[['full_name', 'total_contribution']], 
-                    "💰 Top 5 thành viên đóng góp"
-                )
-                st.markdown(chart_html, unsafe_allow_html=True)
+                contrib_chart = contrib_data.set_index('full_name')['total_contribution']
+                st.bar_chart(contrib_chart, height=300)
             else:
                 st.info("Chưa có đóng góp nào")
 
