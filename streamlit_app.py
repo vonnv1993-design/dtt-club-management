@@ -800,7 +800,12 @@ def main():
             <p>Hệ thống quản lý câu lạc bộ Pickleball chuyên nghiệp</p>
         </div>
     """, unsafe_allow_html=True)
- # Hiển thị thông tin database
+    
+    if not st.session_state.logged_in:
+        show_auth_page()
+    else:
+        show_main_app()
+
 def show_auth_page():
     tab1, tab2 = st.tabs(["🔐 Đăng nhập", "📝 Đăng ký"])
     
@@ -978,14 +983,6 @@ def show_home_page():
         else:
             st.info("Chưa có dữ liệu tài chính")
         st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Database info
-    st.subheader("📊 Thông tin hệ thống")
-    if os.path.exists(DB_FILE):
-        file_size = os.path.getsize(DB_FILE)
-        st.info(f"💾 **Database SQLite**: {DB_FILE} ({file_size} bytes) - Dữ liệu được lưu trữ persistent")
-    else:
-        st.warning("⚠️ Database file không tồn tại")
 
 def show_approval_page():
     if not st.session_state.user['is_admin']:
