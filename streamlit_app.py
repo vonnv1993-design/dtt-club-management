@@ -650,38 +650,6 @@ def get_alerts():
         st.error(f"Lỗi lấy alerts: {str(e)}")
     
     return alerts
-
-# THÊM HÀM TẠO DỮ LIỆU MẪU
-def create_sample_data():
-    """Tạo dữ liệu mẫu để test"""
-    if st.sidebar.button("🧪 Tạo dữ liệu mẫu"):
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Thêm users mẫu chờ phê duyệt
-            sample_users = [
-                ('Nguyễn Văn A', 'nguyenvana@gmail.com', '0123456789', '1990-05-15', hash_password('123456')),
-                ('Trần Thị B', 'tranthib@gmail.com', '0987654321', '1992-08-20', hash_password('123456')),
-                ('Lê Văn C', 'levanc@gmail.com', '0369852147', '1988-12-10', hash_password('123456'))
-            ]
-            
-            for user_data in sample_users:
-                try:
-                    cursor.execute('''
-                        INSERT INTO users (full_name, email, phone, birth_date, password, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (*user_data, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-                except sqlite3.IntegrityError:
-                    pass  # Skip if email already exists
-            
-            conn.commit()
-            conn.close()
-            st.sidebar.success("Đã tạo dữ liệu mẫu!")
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"Lỗi tạo dữ liệu mẫu: {str(e)}")
-
 # Initialize database
 if 'db_initialized' not in st.session_state:
     st.session_state.db_initialized = init_database()
