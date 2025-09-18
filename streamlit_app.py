@@ -800,19 +800,7 @@ def main():
             <p>Hệ thống quản lý câu lạc bộ Pickleball chuyên nghiệp</p>
         </div>
     """, unsafe_allow_html=True)
-    
-    # Hiển thị thông tin database
-    if os.path.exists(DB_FILE):
-        file_size = os.path.getsize(DB_FILE)
-        st.sidebar.success(f"💾 Database: {file_size} bytes")
-    else:
-        st.sidebar.warning("⚠️ Database file không tồn tại")
-    
-    if not st.session_state.logged_in:
-        show_auth_page()
-    else:
-        show_main_app()
-
+ # Hiển thị thông tin database
 def show_auth_page():
     tab1, tab2 = st.tabs(["🔐 Đăng nhập", "📝 Đăng ký"])
     
