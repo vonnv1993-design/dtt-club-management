@@ -136,6 +136,15 @@ st.markdown("""
         margin: 15px 0;
     }
     
+    .edit-form {
+        background: #e3f2fd;
+        border: 1px solid #90caf9;
+        padding: 20px;
+        border-radius: 10px;
+        margin: 15px 0;
+        border-left: 4px solid #2196f3;
+    }
+    
     @media (max-width: 768px) {
         .stat-card {
             margin: 5px 0;
@@ -326,7 +335,7 @@ def get_approved_members():
     try:
         conn = get_db_connection()
         df = pd.read_sql_query('''
-            SELECT id, full_name, phone, birth_date
+            SELECT id, full_name, email, phone, birth_date
             FROM users 
             WHERE is_approved = 1 AND is_admin = 0
             ORDER BY full_name
@@ -368,6 +377,120 @@ def reject_member(user_id):
     except Exception as e:
         st.error(f"Lỗi từ chối: {str(e)}")
         return False
+
+# THÊM CÁC HÀM QUẢN LÝ THÀNH VIÊN MỚI
+def add_member_direct(full_name, email, phone, birth_date, password):
+    """Admin thêm thành viên trực tiếp (đã được phê duyệt ngay)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO users (full_name, email, phone, birth_date, password, is_approved, created_at, approved_at, approved_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (full_name, email, phone, str(birth_date), hash_password(password), 1, 
+              datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+              datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+              'Admin'))
+        
+        conn.commit()
+        conn.close()
+        return True, "Đã thêm thành viên thành công!"
+    except sqlite3.IntegrityError:
+        if conn:
+            conn.close()
+        return False, "Email đã tồn tại!"
+    except Exception as e:
+        if conn:
+            conn.close()
+        return False, f"Lỗi thêm thành viên: {str(e)}"
+
+def update_member(user_id, full_name, email, phone, birth_date, password=None):
+    """Cập nhật thông tin thành viên"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        if password:
+            cursor.execute('''
+                UPDATE users 
+                SET full_name = ?, email = ?, phone = ?, birth_date = ?, password = ?
+                WHERE id = ? AND is_admin = 0
+            ''', (full_name, email, phone, str(birth_date), hash_password(password), user_id))
+        else:
+            cursor.execute('''
+                UPDATE users 
+                SET full_name = ?, email = ?, phone = ?, birth_date = ?
+                WHERE id = ? AND is_admin = 0
+            ''', (full_name, email, phone, str(birth_date), user_id))
+        
+        conn.commit()
+        conn.close()
+        return True, "Đã cập nhật thông tin thành viên!"
+    except sqlite3.IntegrityError:
+        if conn:
+            conn.close()
+        return False, "Email đã tồn tại!"
+    except Exception as e:
+        if conn:
+            conn.close()
+        return False, f"Lỗi cập nhật: {str(e)}"
+
+def delete_member(user_id):
+    """Xóa thành viên và tất cả dữ liệu liên quan"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Xóa các dữ liệu liên quan trước
+        cursor.execute('DELETE FROM rankings WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM votes WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM finances WHERE user_id = ?', (user_id,))
+        
+        # Xóa user (chỉ xóa thành viên, không xóa admin)
+        cursor.execute('DELETE FROM users WHERE id = ? AND is_admin = 0', (user_id,))
+        
+        affected_rows = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if affected_rows > 0:
+            return True, "Đã xóa thành viên và tất cả dữ liệu liên quan!"
+        else:
+            return False, "Không thể xóa (có thể là admin hoặc thành viên không tồn tại)!"
+            
+    except Exception as e:
+        if conn:
+            conn.close()
+        return False, f"Lỗi xóa thành viên: {str(e)}"
+
+def get_member_by_id(user_id):
+    """Lấy thông tin thành viên theo ID"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, full_name, email, phone, birth_date
+            FROM users 
+            WHERE id = ? AND is_admin = 0
+        ''', (user_id,))
+        
+        member = cursor.fetchone()
+        conn.close()
+        
+        if member:
+            return {
+                'id': member[0],
+                'full_name': member[1],
+                'email': member[2],
+                'phone': member[3],
+                'birth_date': member[4]
+            }
+        return None
+    except Exception as e:
+        st.error(f"Lỗi lấy thông tin thành viên: {str(e)}")
+        return None
 
 def get_rankings():
     try:
@@ -651,37 +774,6 @@ def get_alerts():
     
     return alerts
 
-# THÊM HÀM TẠO DỮ LIỆU MẪU
-def create_sample_data():
-    """Tạo dữ liệu mẫu để test"""
-    if st.sidebar.button("🧪 Tạo dữ liệu mẫu"):
-        try:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            
-            # Thêm users mẫu chờ phê duyệt
-            sample_users = [
-                ('Nguyễn Văn A', 'nguyenvana@gmail.com', '0123456789', '1990-05-15', hash_password('123456')),
-                ('Trần Thị B', 'tranthib@gmail.com', '0987654321', '1992-08-20', hash_password('123456')),
-                ('Lê Văn C', 'levanc@gmail.com', '0369852147', '1988-12-10', hash_password('123456'))
-            ]
-            
-            for user_data in sample_users:
-                try:
-                    cursor.execute('''
-                        INSERT INTO users (full_name, email, phone, birth_date, password, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (*user_data, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-                except sqlite3.IntegrityError:
-                    pass  # Skip if email already exists
-            
-            conn.commit()
-            conn.close()
-            st.sidebar.success("Đã tạo dữ liệu mẫu!")
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"Lỗi tạo dữ liệu mẫu: {str(e)}")
-
 # Initialize database
 if 'db_initialized' not in st.session_state:
     st.session_state.db_initialized = init_database()
@@ -693,6 +785,8 @@ if 'user' not in st.session_state:
     st.session_state.user = None
 if 'current_page' not in st.session_state:
     st.session_state.current_page = "🏠 Trang chủ"
+if 'editing_member_id' not in st.session_state:
+    st.session_state.editing_member_id = None
 
 # Main app
 def main():
@@ -706,9 +800,6 @@ def main():
             <p>Hệ thống quản lý câu lạc bộ Pickleball chuyên nghiệp</p>
         </div>
     """, unsafe_allow_html=True)
-    
-    # Hiển thị nút tạo dữ liệu mẫu trong sidebar để test
-    create_sample_data()
     
     # Hiển thị thông tin database
     if os.path.exists(DB_FILE):
@@ -787,6 +878,8 @@ def show_main_app():
         show_home_page()
     elif st.session_state.current_page == "✅ Phê duyệt thành viên":
         show_approval_page()
+    elif st.session_state.current_page == "✏️ Quản lý thành viên":
+        show_member_management_page()
     elif st.session_state.current_page == "👥 Danh sách thành viên":
         show_members_page()
     elif st.session_state.current_page == "🏆 Xếp hạng":
@@ -803,6 +896,7 @@ def show_navigation_menu():
     
     if st.session_state.user['is_admin']:
         menu_items.insert(1, "✅ Phê duyệt thành viên")
+        menu_items.insert(2, "✏️ Quản lý thành viên")
     
     st.markdown('<div class="nav-menu">', unsafe_allow_html=True)
     
@@ -812,6 +906,7 @@ def show_navigation_menu():
         with cols[i]:
             if st.button(item, key=f"nav_{item}", use_container_width=True):
                 st.session_state.current_page = item
+                st.session_state.editing_member_id = None  # Reset editing state
                 st.rerun()
     
     with cols[-1]:
@@ -819,6 +914,7 @@ def show_navigation_menu():
             st.session_state.logged_in = False
             st.session_state.user = None
             st.session_state.current_page = "🏠 Trang chủ"
+            st.session_state.editing_member_id = None
             st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
@@ -975,6 +1071,156 @@ def show_approval_page():
                             st.error("Lỗi từ chối!")
                 
                 st.markdown("---")
+
+# TRANG QUẢN LÝ THÀNH VIÊN MỚI
+def show_member_management_page():
+    if not st.session_state.user['is_admin']:
+        st.error("Chỉ admin mới có quyền truy cập trang này!")
+        return
+    
+    st.title("✏️ Quản lý thành viên")
+    
+    # Tabs for different management functions
+    tab1, tab2, tab3 = st.tabs(["➕ Thêm thành viên", "✏️ Sửa thành viên", "🗑️ Xóa thành viên"])
+    
+    with tab1:
+        st.subheader("Thêm thành viên mới")
+        st.info("💡 Thành viên được thêm bởi admin sẽ được phê duyệt ngay lập tức")
+        
+        with st.form("add_member_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                full_name = st.text_input("👤 Họ và tên", placeholder="Nhập họ và tên đầy đủ")
+                email = st.text_input("📧 Email", placeholder="Nhập địa chỉ email")
+                phone = st.text_input("📱 Số điện thoại", placeholder="Nhập số điện thoại")
+            
+            with col2:
+                birth_date = st.date_input("📅 Ngày sinh", min_value=datetime(1950, 1, 1), max_value=datetime(2010, 12, 31))
+                password = st.text_input("🔒 Mật khẩu", type="password", placeholder="Nhập mật khẩu")
+                confirm_password = st.text_input("🔒 Xác nhận mật khẩu", type="password", placeholder="Nhập lại mật khẩu")
+            
+            if st.form_submit_button("💾 Thêm thành viên", use_container_width=True):
+                if all([full_name, email, phone, birth_date, password, confirm_password]):
+                    if password == confirm_password:
+                        success, message = add_member_direct(full_name, email, phone, birth_date, password)
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+                    else:
+                        st.error("Mật khẩu xác nhận không khớp!")
+                else:
+                    st.error("Vui lòng nhập đầy đủ thông tin!")
+    
+    with tab2:
+        st.subheader("Chỉnh sửa thông tin thành viên")
+        
+        members_df = get_approved_members()
+        if members_df.empty:
+            st.info("Chưa có thành viên nào để chỉnh sửa")
+        else:
+            # Member selection
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                member_options = [f"{row['full_name']} ({row['email']})" for _, row in members_df.iterrows()]
+                selected_idx = st.selectbox("👤 Chọn thành viên cần sửa", range(len(member_options)), format_func=lambda x: member_options[x])
+                selected_member = members_df.iloc[selected_idx]
+            
+            with col2:
+                if st.button("📝 Chọn để sửa", use_container_width=True):
+                    st.session_state.editing_member_id = selected_member['id']
+                    st.rerun()
+            
+            # Edit form
+            if st.session_state.editing_member_id:
+                member_data = get_member_by_id(st.session_state.editing_member_id)
+                if member_data:
+                    st.markdown(f"""
+                        <div class="edit-form">
+                            <h4>✏️ Đang sửa: {member_data['full_name']}</h4>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    with st.form("edit_member_form"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            edit_full_name = st.text_input("👤 Họ và tên", value=member_data['full_name'])
+                            edit_email = st.text_input("📧 Email", value=member_data['email'])
+                            edit_phone = st.text_input("📱 Số điện thoại", value=member_data['phone'])
+                        
+                        with col2:
+                            edit_birth_date = st.date_input("📅 Ngày sinh", value=datetime.strptime(member_data['birth_date'], '%Y-%m-%d').date())
+                            edit_password = st.text_input("🔒 Mật khẩu mới (để trống nếu không đổi)", type="password")
+                            confirm_edit_password = st.text_input("🔒 Xác nhận mật khẩu mới", type="password")
+                        
+                        col_submit, col_cancel = st.columns(2)
+                        
+                        with col_submit:
+                            if st.form_submit_button("💾 Cập nhật", use_container_width=True):
+                                if edit_password and edit_password != confirm_edit_password:
+                                    st.error("Mật khẩu xác nhận không khớp!")
+                                else:
+                                    success, message = update_member(
+                                        st.session_state.editing_member_id,
+                                        edit_full_name, edit_email, edit_phone, edit_birth_date,
+                                        edit_password if edit_password else None
+                                    )
+                                    if success:
+                                        st.success(message)
+                                        st.session_state.editing_member_id = None
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
+                        
+                        with col_cancel:
+                            if st.form_submit_button("❌ Hủy", use_container_width=True):
+                                st.session_state.editing_member_id = None
+                                st.rerun()
+    
+    with tab3:
+        st.subheader("Xóa thành viên")
+        st.warning("⚠️ **Cảnh báo**: Xóa thành viên sẽ xóa toàn bộ dữ liệu liên quan (rankings, votes, finances)")
+        
+        members_df = get_approved_members()
+        if members_df.empty:
+            st.info("Chưa có thành viên nào để xóa")
+        else:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📋 Danh sách thành viên")
+                for _, member in members_df.iterrows():
+                    st.markdown(f"""
+                        <div class="member-card">
+                            <strong>👤 {member['full_name']}</strong><br>
+                            📧 {member['email']}<br>
+                            📱 {member['phone']}
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if st.button(f"🗑️ Xóa {member['full_name']}", key=f"delete_{member['id']}", type="secondary", use_container_width=True):
+                        # Confirmation dialog
+                        with col2:
+                            st.error(f"⚠️ Bạn có chắc chắn muốn xóa **{member['full_name']}**?")
+                            st.write("Hành động này không thể hoàn tác!")
+                            
+                            col_confirm, col_cancel_delete = st.columns(2)
+                            
+                            with col_confirm:
+                                if st.button("✅ Xác nhận xóa", key=f"confirm_delete_{member['id']}", type="primary", use_container_width=True):
+                                    success, message = delete_member(member['id'])
+                                    if success:
+                                        st.success(message)
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
+                            
+                            with col_cancel_delete:
+                                if st.button("❌ Hủy", key=f"cancel_delete_{member['id']}", use_container_width=True):
+                                    st.rerun()
 
 def show_members_page():
     st.title("👥 Danh sách thành viên")
